@@ -14,6 +14,7 @@ from carto.app import create_app
 from carto.database import Database
 from carto.ui.main_window import MainWindow
 from carto.ui.map_view import LAYER_NAMES, MapView
+from carto.ui.points_panel import PointsPanel
 from carto.ui.tree_panel import KIND_FOLDER, KIND_TRACK, ROLE_ID, ROLE_KIND, TreePanel
 
 MAP_LOAD_TIMEOUT_MS = 20000
@@ -75,12 +76,16 @@ def test_qapplication_recoit_toujours_un_argv0(qapp):
 
 
 def test_fenetre_principale_deux_panneaux(qapp, db):
+    """Bibliothèque et points à gauche, carte à droite."""
     window = MainWindow(db=db)
     splitter = window.centralWidget()
+    gauche = splitter.widget(0)
 
     assert splitter.count() == 2
-    assert isinstance(splitter.widget(0), TreePanel)
     assert isinstance(splitter.widget(1), MapView)
+    assert gauche.count() == 2
+    assert isinstance(gauche.widget(0), TreePanel)
+    assert isinstance(gauche.widget(1), PointsPanel)
     assert "Carto" in window.windowTitle()
 
     window.close()

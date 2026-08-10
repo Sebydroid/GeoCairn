@@ -22,7 +22,7 @@ from .. import APP_NAME, APP_VERSION
 from ..config import db_path
 from ..database import Database
 from ..editor import DraftTrack
-from ..geo import format_length, total_length
+from ..geo import bounds, format_length, total_length
 from ..gpx import (
     GpxParseError,
     count_waypoints,
@@ -31,6 +31,7 @@ from ..gpx import (
     write_gpx,
 )
 from .map_view import LAYER_NAMES, MapView
+from .points_panel import PointsPanel
 from .tree_panel import KIND_TRACK, TreePanel
 
 
@@ -50,10 +51,18 @@ class MainWindow(QMainWindow):
         self.displayed_track_id: int | None = None
 
         self.tree_panel = TreePanel(self.db, self)
+        self.points_panel = PointsPanel(self)
         self.map_view = MapView(self)
 
+        left = QSplitter(Qt.Orientation.Vertical, self)
+        left.addWidget(self.tree_panel)
+        left.addWidget(self.points_panel)
+        left.setStretchFactor(0, 3)
+        left.setStretchFactor(1, 2)
+        left.setSizes([480, 320])
+
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        splitter.addWidget(self.tree_panel)
+        splitter.addWidget(left)
         splitter.addWidget(self.map_view)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -71,10 +80,20 @@ class MainWindow(QMainWindow):
         self.map_view.map_clicked.connect(self._on_map_clicked)
         self.map_view.layer_changed.connect(self._on_layer_changed_from_map)
         self.map_view.undo_requested.connect(self.undo_last_point)
+        self.map_view.point_moved.connect(self.move_draft_point)
+        self.map_view.point_context.connect(self.remove_draft_point)
+        self.map_view.point_selected.connect(self.select_draft_point)
 
         self.tree_panel.export_requested.connect(self.export_track)
         self.tree_panel.status_message.connect(self.status_label.setText)
         self.tree_panel.track_activated.connect(self.display_track)
+        self.tree_panel.resume_requested.connect(self.resume_track)
+        self.tree_panel.duplicate_requested.connect(self.duplicate_track)
+        self.tree_panel.merge_requested.connect(self.merge_track)
+
+        self.points_panel.point_selected.connect(self.map_view.select_draft_point)
+        self.points_panel.delete_requested.connect(self.remove_draft_points)
+        self.points_panel.split_requested.connect(self.split_draft)
 
         self._update_draft_actions()
 
@@ -129,6 +148,24 @@ class MainWindow(QMainWindow):
         # reçu comme `confirm` et sauterait la demande de confirmation.
         self.action_clear.triggered.connect(lambda: self.clear_draft())
 
+        self.action_resume = QAction("Modifier la trace", self)
+        self.action_resume.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
+        )
+        self.action_resume.setToolTip(
+            "Reprendre la trace sélectionnée pour la prolonger ou la corriger"
+        )
+        self.action_resume.triggered.connect(self._resume_selected_track)
+
+        self.action_close_loop = QAction("Fermer la boucle", self)
+        self.action_close_loop.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
+        )
+        self.action_close_loop.setToolTip(
+            "Ramener le tracé à son point de départ"
+        )
+        self.action_close_loop.triggered.connect(lambda: self.close_draft_loop())
+
         self.action_import = QAction("Importer un GPX", self)
         self.action_import.setIcon(
             style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
@@ -159,7 +196,9 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         toolbar.addAction(self.action_create)
+        toolbar.addAction(self.action_resume)
         toolbar.addAction(self.action_undo)
+        toolbar.addAction(self.action_close_loop)
         toolbar.addAction(self.action_save)
         toolbar.addAction(self.action_clear)
         toolbar.addSeparator()
@@ -190,7 +229,9 @@ class MainWindow(QMainWindow):
 
         edit_menu = menu.addMenu("&Trace")
         edit_menu.addAction(self.action_create)
+        edit_menu.addAction(self.action_resume)
         edit_menu.addAction(self.action_undo)
+        edit_menu.addAction(self.action_close_loop)
         edit_menu.addAction(self.action_save)
         edit_menu.addAction(self.action_clear)
         edit_menu.addSeparator()
@@ -279,7 +320,235 @@ class MainWindow(QMainWindow):
         self.action_undo.setEnabled(has_points)
         self.action_clear.setEnabled(has_points)
         self.action_save.setEnabled(len(self.draft) >= 2)
+        self.action_close_loop.setEnabled(
+            len(self.draft) >= 3 and not self.draft.is_loop
+        )
         self.draft_label.setText(self.draft.summary())
+        self.points_panel.refresh(self.draft)
+
+    # --------------------------------------------- édition avancée (Jalon 6)
+
+    def resume_track(self, track_id: int) -> bool:
+        """Reprend une trace enregistrée pour la prolonger ou la corriger."""
+        track = self.db.get_track(track_id, with_points=True)
+        if track is None or not track.points:
+            self.status_label.setText("Cette trace ne contient aucun point.")
+            return False
+
+        if not self.draft.is_empty and not self._confirm_discard_draft():
+            return False
+
+        self.draft.load_track(track)
+        self._show_draft_on_map(fit=True)
+        self.map_view.clear_track()
+        self.displayed_track_id = None
+        self.set_edit_mode(True)
+        self._update_draft_actions()
+        self.status_label.setText(
+            f"Modification de « {track.name} » : cliquez pour prolonger, "
+            "glissez un point pour le déplacer."
+        )
+        return True
+
+    def _resume_selected_track(self) -> None:
+        kind, ident = self.tree_panel.current_selection()
+        if kind != KIND_TRACK:
+            QMessageBox.information(
+                self,
+                "Aucune trace sélectionnée",
+                "Sélectionnez une trace dans l'arborescence pour la modifier.",
+            )
+            return
+        self.resume_track(int(ident))
+
+    def _confirm_discard_draft(self) -> bool:
+        answer = QMessageBox.question(
+            self,
+            "Abandonner la trace en cours ?",
+            f"{self.draft.summary()}\n\nCe travail n'est pas enregistré. "
+            "Continuer et le perdre ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def close_draft_loop(self) -> bool:
+        """Ferme la trace en cours en la ramenant à son point de départ."""
+        if not self.draft.close_loop():
+            self.status_label.setText(
+                "Il faut au moins trois points, et la boucle ne doit pas déjà "
+                "être fermée."
+            )
+            return False
+        depart = self.draft.points[0]
+        self.map_view.append_draft_point(depart.lat, depart.lon)
+        self._update_draft_actions()
+        self.status_label.setText("Boucle fermée.")
+        return True
+
+    def _show_draft_on_map(self, fit: bool = False) -> None:
+        """Redessine le brouillon sur la carte, en le cadrant si demandé.
+
+        Sans recadrage, une trace reprise reste souvent hors du champ visible.
+        """
+        self.map_view.set_draft(self.draft.points)
+        if not fit:
+            return
+        box = bounds(self.draft.points)
+        if box is not None:
+            self.map_view.fit_bounds(*box)
+
+    def select_draft_point(self, index: int) -> None:
+        """Un clic sur un point de la carte le désigne dans le panneau."""
+        self.points_panel.select_index(index)
+        self.map_view.select_draft_point(index)
+        if 0 <= index < len(self.draft):
+            point = self.draft.points[index]
+            self.status_label.setText(
+                f"Point {index + 1} sur {len(self.draft)} — "
+                f"{point.lat:.5f} ; {point.lon:.5f}"
+            )
+
+    def move_draft_point(self, index: int, lat: float, lon: float) -> bool:
+        """Repositionne un point après un glisser sur la carte."""
+        if not self.draft.move_point(index, lat, lon):
+            return False
+        self.map_view.move_draft_point(index, lat, lon)
+        self._update_draft_actions()
+        self.status_label.setText(
+            f"Point {index + 1} déplacé en {lat:.5f} ; {lon:.5f}"
+        )
+        return True
+
+    def remove_draft_point(self, index: int) -> bool:
+        """Supprime un point précis (clic droit sur la carte)."""
+        return self.remove_draft_points([index])
+
+    def remove_draft_points(self, indexes: list[int]) -> bool:
+        """Supprime un point ou une sélection de points."""
+        supprimes = self.draft.remove_points(indexes)
+        if not supprimes:
+            return False
+        self.map_view.set_draft(self.draft.points)
+        self._update_draft_actions()
+        pluriel = "s" if supprimes > 1 else ""
+        self.status_label.setText(f"{supprimes} point{pluriel} supprimé{pluriel}.")
+        return True
+
+    def split_draft(self, index: int) -> tuple[int, int] | None:
+        """Découpe en deux la trace reprise, au point sélectionné."""
+        if not self.draft.is_existing:
+            QMessageBox.information(
+                self,
+                "Trace non enregistrée",
+                "Enregistrez d'abord la trace : le découpage agit sur une "
+                "trace de la bibliothèque.",
+            )
+            return None
+
+        moities = self.draft.split_at(index)
+        if moities is None:
+            self.status_label.setText(
+                "Le point de découpe doit laisser au moins deux points de "
+                "chaque côté."
+            )
+            return None
+
+        # Le brouillon peut avoir été modifié depuis la reprise : on l'écrit
+        # avant de découper, sinon la coupure porterait sur d'anciens points.
+        track_id = self.draft.track_id
+        self.db.replace_points(track_id, self.draft.points)
+        try:
+            premier, second = self.db.split_track(track_id, index)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Découpage impossible", str(exc))
+            return None
+
+        self.draft.reset()
+        self.map_view.clear_draft()
+        self.set_edit_mode(False)
+        self._update_draft_actions()
+
+        self.tree_panel.refresh()
+        self.tree_panel.select_track(second)
+        self.display_track(premier)
+        self.status_label.setText(
+            f"Trace découpée en « {self.db.get_track(premier).name} » et "
+            f"« {self.db.get_track(second).name} »."
+        )
+        return (premier, second)
+
+    def duplicate_track(self, track_id: int, name: str | None = None) -> int | None:
+        """Duplique une trace de la bibliothèque."""
+        track = self.db.get_track(track_id)
+        if track is None:
+            return None
+        copie = self.db.duplicate_track(track_id, name)
+        self.tree_panel.refresh()
+        self.tree_panel.select_track(copie)
+        self.status_label.setText(
+            f"« {track.name} » dupliquée en « {self.db.get_track(copie).name} »."
+        )
+        return copie
+
+    def merge_track(self, track_id: int, other_id: int | None = None) -> int | None:
+        """Fusionne la trace sélectionnée avec une autre.
+
+        `other_id` sert aux tests ; sans lui, l'utilisateur choisit la seconde
+        trace dans une liste.
+        """
+        track = self.db.get_track(track_id)
+        if track is None:
+            return None
+
+        candidates = [
+            t for t in self._all_tracks() if t.id != track_id and t.point_count
+        ]
+        if not candidates:
+            QMessageBox.information(
+                self,
+                "Fusion impossible",
+                "Il faut une seconde trace non vide pour fusionner.",
+            )
+            return None
+
+        if other_id is None:
+            libelles = [f"{t.name} ({t.point_count} pts)" for t in candidates]
+            choix, accepte = QInputDialog.getItem(
+                self,
+                "Fusionner des traces",
+                f"Ajouter à la suite de « {track.name} » :",
+                libelles,
+                0,
+                False,
+            )
+            if not accepte:
+                return None
+            other_id = candidates[libelles.index(choix)].id
+
+        autre = self.db.get_track(other_id)
+        if autre is None:
+            return None
+
+        fusion = self.db.merge_tracks(track_id, other_id)
+        self.tree_panel.refresh()
+        self.tree_panel.select_track(fusion)
+        self.display_track(fusion)
+        self.status_label.setText(
+            f"« {track.name} » et « {autre.name} » fusionnées en "
+            f"« {self.db.get_track(fusion).name} »."
+        )
+        return fusion
+
+    def _all_tracks(self) -> list:
+        """Toutes les traces de la bibliothèque, tous dossiers confondus."""
+        tracks = list(self.db.list_tracks(None))
+        a_visiter = [f.id for f in self.db.list_folders(None)]
+        while a_visiter:
+            folder_id = a_visiter.pop()
+            tracks.extend(self.db.list_tracks(folder_id))
+            a_visiter.extend(f.id for f in self.db.list_folders(folder_id))
+        return tracks
 
     # ------------------------------------------------- sauvegarde (Jalon 4)
 
@@ -306,18 +575,28 @@ class MainWindow(QMainWindow):
             if not accepted or not name.strip():
                 return None
 
-        folder_id = self.tree_panel.current_folder_id()
-        track_id = self.db.create_track(
-            name, folder_id=folder_id, points=self.draft.points
-        )
+        if self.draft.is_existing:
+            # Reprise d'une trace : on met à jour au lieu d'en créer une autre.
+            track_id = self.draft.track_id
+            self.db.replace_points(track_id, self.draft.points)
+            self.db.rename_track(track_id, name)
+            message = f"Trace « {name} » mise à jour."
+        else:
+            track_id = self.db.create_track(
+                name,
+                folder_id=self.tree_panel.current_folder_id(),
+                points=self.draft.points,
+                is_loop=self.draft.is_loop,
+            )
+            message = f"Trace « {name} » enregistrée."
 
-        self.draft.clear()
+        self.draft.reset()
         self.map_view.clear_draft()
         self._update_draft_actions()
 
         self.tree_panel.refresh()
         self.tree_panel.select_track(track_id)
-        self.status_label.setText(f"Trace « {name} » enregistrée.")
+        self.status_label.setText(message)
         return track_id
 
     # ------------------------------------------- import et affichage (J5)
@@ -457,7 +736,9 @@ class MainWindow(QMainWindow):
         # Réapplique l'état courant à une carte fraîchement chargée.
         self.map_view.set_edit_mode(self.edit_mode)
         if not self.draft.is_empty:
-            self.map_view.set_draft(self.draft.points)
+            # Recadrer aussi : les appels émis avant le chargement de la page
+            # sont perdus, y compris le cadrage initial de la reprise.
+            self._show_draft_on_map(fit=True)
         if self.displayed_track_id is not None:
             self.display_track(self.displayed_track_id)
 

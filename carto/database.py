@@ -302,6 +302,88 @@ class Database:
         with self.conn:
             self.conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
 
+    # ------------------------------------------------- duplication, découpage
+
+    def duplicate_track(self, track_id: int, name: str | None = None) -> int:
+        """Copie une trace avec ses points, dans le même dossier."""
+        track = self.get_track(track_id, with_points=True)
+        if track is None:
+            raise NotFoundError(f"Trace {track_id} introuvable.")
+        return self.create_track(
+            name if name is not None else f"{track.name} (copie)",
+            folder_id=track.folder_id,
+            points=track.points,
+            color=track.color,
+            description=track.description,
+            is_loop=track.is_loop,
+        )
+
+    def split_track(self, track_id: int, index: int) -> tuple[int, int]:
+        """Découpe une trace en deux au point `index`.
+
+        Le point de coupure appartient aux deux moitiés, afin qu'elles se
+        touchent. La trace d'origine conserve son identifiant et devient la
+        première moitié ; la seconde donne une nouvelle trace « (suite) ».
+        Retourne les deux identifiants.
+        """
+        track = self.get_track(track_id, with_points=True)
+        if track is None:
+            raise NotFoundError(f"Trace {track_id} introuvable.")
+        if not 1 <= index <= len(track.points) - 2:
+            raise ValueError(
+                "Le point de découpe doit laisser au moins deux points de "
+                "chaque côté."
+            )
+
+        premiere = track.points[: index + 1]
+        seconde = track.points[index:]
+
+        second_id = self.create_track(
+            f"{track.name} (suite)",
+            folder_id=track.folder_id,
+            points=seconde,
+            color=track.color,
+            description=track.description,
+        )
+        self.replace_points(track_id, premiere)
+        with self.conn:
+            self.conn.execute(
+                "UPDATE tracks SET is_loop = 0 WHERE id = ?", (track_id,)
+            )
+        return (track_id, second_id)
+
+    def merge_tracks(
+        self,
+        first_id: int,
+        second_id: int,
+        name: str | None = None,
+        keep_sources: bool = False,
+    ) -> int:
+        """Fusionne deux traces en une nouvelle, dans l'ordre indiqué.
+
+        Les deux traces d'origine sont supprimées, sauf si `keep_sources`.
+        Retourne l'identifiant de la trace fusionnée.
+        """
+        if first_id == second_id:
+            raise ValueError("Une trace ne peut pas être fusionnée avec elle-même.")
+        first = self.get_track(first_id, with_points=True)
+        second = self.get_track(second_id, with_points=True)
+        if first is None:
+            raise NotFoundError(f"Trace {first_id} introuvable.")
+        if second is None:
+            raise NotFoundError(f"Trace {second_id} introuvable.")
+
+        merged_id = self.create_track(
+            name if name is not None else f"{first.name} + {second.name}",
+            folder_id=first.folder_id,
+            points=first.points + second.points,
+            color=first.color,
+        )
+        if not keep_sources:
+            self.delete_track(first_id)
+            self.delete_track(second_id)
+        return merged_id
+
     # ----------------------------------------------------------------- points
 
     def _insert_points(

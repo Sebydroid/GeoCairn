@@ -29,6 +29,9 @@ class MapBridge(QObject):
     view_changed = pyqtSignal(float, float, int)
     layer_changed = pyqtSignal(str)
     undo_requested = pyqtSignal()
+    point_moved = pyqtSignal(int, float, float)
+    point_context = pyqtSignal(int)
+    point_selected = pyqtSignal(int)
 
     @pyqtSlot()
     def js_ready(self) -> None:
@@ -37,6 +40,18 @@ class MapBridge(QObject):
     @pyqtSlot()
     def js_undo_request(self) -> None:
         self.undo_requested.emit()
+
+    @pyqtSlot(int, float, float)
+    def js_point_moved(self, index: int, lat: float, lon: float) -> None:
+        self.point_moved.emit(index, lat, lon)
+
+    @pyqtSlot(int)
+    def js_point_context(self, index: int) -> None:
+        self.point_context.emit(index)
+
+    @pyqtSlot(int)
+    def js_point_selected(self, index: int) -> None:
+        self.point_selected.emit(index)
 
     @pyqtSlot(float, float)
     def js_map_click(self, lat: float, lon: float) -> None:
@@ -68,6 +83,9 @@ class MapView(QWebEngineView):
     view_changed = pyqtSignal(float, float, int)
     layer_changed = pyqtSignal(str)
     undo_requested = pyqtSignal()
+    point_moved = pyqtSignal(int, float, float)
+    point_context = pyqtSignal(int)
+    point_selected = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -93,6 +111,9 @@ class MapView(QWebEngineView):
         self.bridge.view_changed.connect(self.view_changed)
         self.bridge.layer_changed.connect(self.layer_changed)
         self.bridge.undo_requested.connect(self.undo_requested)
+        self.bridge.point_moved.connect(self.point_moved)
+        self.bridge.point_context.connect(self.point_context)
+        self.bridge.point_selected.connect(self.point_selected)
 
         self._channel = QWebChannel(self._page)
         self._channel.registerObject("bridge", self.bridge)
@@ -141,6 +162,14 @@ class MapView(QWebEngineView):
 
     def clear_draft(self) -> None:
         self.run_js("carto.clearDraft();")
+
+    def move_draft_point(self, index: int, lat: float, lon: float) -> None:
+        """Repositionne un point du brouillon sur la carte."""
+        self.run_js(f"carto.movePoint({int(index)}, {lat!r}, {lon!r});")
+
+    def select_draft_point(self, index: int | None) -> None:
+        """Met un point en évidence (−1 ou None pour n'en sélectionner aucun)."""
+        self.run_js(f"carto.selectPoint({-1 if index is None else int(index)});")
 
     # -------------------------------------------------- trace affichée (J5)
 

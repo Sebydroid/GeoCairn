@@ -36,6 +36,7 @@ pytest tests/
 | `carto/gpx.py` | Lecture et écriture du format GPX |
 | `carto/ui/main_window.py` | Fenêtre principale (arborescence + carte) |
 | `carto/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
+| `carto/ui/points_panel.py` | Liste des points de la trace en cours d'édition |
 | `carto/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
 | `carto/resources/map.html` | Carte : couches, évènements, pont JS ↔ Python |
 | `carto/resources/leaflet/` | Leaflet 1.9.4 embarqué (fonctionnement hors ligne) |
@@ -77,7 +78,11 @@ emplacement (utilisée par les tests).
 - **Jalon 5 — Import et affichage des traces existantes** : fait.
   Import d'un ou plusieurs fichiers GPX (`Ctrl+I`), double-clic sur une trace
   pour l'afficher et cadrer la carte dessus, repères de départ et d'arrivée.
-- Jalons 6 et 7 : à venir (édition avancée, packaging `.exe`).
+- **Jalon 6 — Édition avancée des traces** : fait.
+  Reprise d'une trace pour la prolonger, fermeture en boucle, déplacement d'un
+  point à la souris, suppression d'un point ou d'une sélection, découpage en
+  deux, fusion de deux traces, duplication.
+- Jalon 7 : à venir (packaging `.exe`).
 
 ## Utilisation
 
@@ -108,6 +113,30 @@ Double-cliquer sur une trace l'affiche en bleu et cadre la carte dessus, avec un
 repère vert au départ et rouge à l'arrivée. La barre d'état indique le nombre de
 points et la distance. Le brouillon en cours de saisie (rouge) reste visible :
 les deux couleurs permettent de ne pas les confondre.
+
+### Modifier une trace existante
+
+**Modifier la trace** (barre d'outils ou clic droit) reprend la trace
+sélectionnée : ses points passent en édition, la carte se cadre dessus et le
+panneau du bas les liste un par un.
+
+- **Prolonger** : cliquer sur la carte ajoute des points à la suite.
+- **Déplacer un point** : le glisser à la souris.
+- **Sélectionner un point** : le cliquer sur la carte, ou cliquer sa ligne dans
+  le panneau ; il apparaît en jaune.
+- **Supprimer** : clic droit sur un point de la carte, ou sélection multiple
+  dans le panneau puis **Supprimer**.
+- **Fermer la boucle** ramène le tracé à son point de départ.
+- **Découper ici** coupe la trace en deux au point sélectionné. Le point de
+  coupure appartient aux deux moitiés, qui restent donc jointives. La seconde
+  moitié devient une trace « (suite) ». Le découpage n'agit que sur une trace
+  déjà enregistrée.
+- **Enregistrer** (`Ctrl+S`) met à jour la trace reprise — sans créer de
+  doublon — et permet au passage de la renommer.
+
+**Fusionner avec…** (clic droit) ajoute une autre trace à la suite de celle
+sélectionnée ; les deux traces d'origine sont remplacées par la fusion.
+**Dupliquer la trace** en crée une copie indépendante, dans le même dossier.
 
 ### Importer et exporter
 

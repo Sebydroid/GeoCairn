@@ -119,6 +119,9 @@ class TreePanel(QWidget):
     selection_changed = pyqtSignal(str, object)
     export_requested = pyqtSignal(int)
     status_message = pyqtSignal(str)
+    resume_requested = pyqtSignal(int)
+    duplicate_requested = pyqtSignal(int)
+    merge_requested = pyqtSignal(int)
 
     def __init__(self, db: Database, parent=None) -> None:
         super().__init__(parent)
@@ -262,6 +265,19 @@ class TreePanel(QWidget):
             menu.addAction("Supprimer le dossier", lambda: self.delete_selected())
         elif kind == KIND_TRACK:
             menu.addSeparator()
+            menu.addAction(
+                "Modifier la trace",
+                lambda: self._emit_for_track(self.resume_requested),
+            )
+            menu.addAction(
+                "Dupliquer la trace",
+                lambda: self._emit_for_track(self.duplicate_requested),
+            )
+            menu.addAction(
+                "Fusionner avec…",
+                lambda: self._emit_for_track(self.merge_requested),
+            )
+            menu.addSeparator()
             menu.addAction("Exporter en GPX…", self._request_export)
             menu.addAction("Renommer la trace…", lambda: self.rename_selected())
             menu.addAction("Supprimer la trace", lambda: self.delete_selected())
@@ -269,9 +285,13 @@ class TreePanel(QWidget):
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
     def _request_export(self) -> None:
+        self._emit_for_track(self.export_requested)
+
+    def _emit_for_track(self, signal) -> None:
+        """Émet `signal` avec l'identifiant de la trace sélectionnée."""
         kind, ident = self.current_selection()
         if kind == KIND_TRACK:
-            self.export_requested.emit(int(ident))
+            signal.emit(int(ident))
 
     # --------------------------------------------------------- opérations
 
