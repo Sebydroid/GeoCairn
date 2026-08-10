@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Carto - Carte</title>
+    <link rel="stylesheet" href="leaflet/leaflet.css" />
+    <script src="leaflet/leaflet.js"></script>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+    <style>
+        html, body { height: 100%; margin: 0; padding: 0; }
+        #map { height: 100%; width: 100%; background: #f2efe9; }
+        .leaflet-container { font-family: "Segoe UI", Arial, sans-serif; }
+        #status {
+            position: absolute; bottom: 8px; left: 8px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.85); border-radius: 4px;
+            padding: 3px 8px; font: 12px "Segoe UI", Arial, sans-serif;
+            color: #333; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="status">Chargement de la carte…</div>
+
+    <script>
+    "use strict";
+
+    // --- Couches cartographiques -------------------------------------------
+    var IGN_BASE = "https://data.geopf.fr/wmts?SERVICE=WMTS&VERSION=1.0.0"
+        + "&REQUEST=GetTile&STYLE=normal&TILEMATRIXSET=PM"
+        + "&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
+
+    var layers = {
+        "Plan (OpenStreetMap)": L.tileLayer(
+            "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            { maxZoom: 19, attribution: "© OpenStreetMap" }),
+
+        "Aérienne / Satellite": L.tileLayer(
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            { maxZoom: 19, attribution: "© Esri, Maxar, Earthstar Geographics" }),
+
+        "IGN Plan": L.tileLayer(
+            IGN_BASE + "&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&FORMAT=image/png",
+            { maxZoom: 19, attribution: "© IGN - Géoplateforme" }),
+
+        // Carte topographique IGN librement diffusée. Le SCAN 25 (1:25000)
+        // n'est plus accessible sans licence payante sur la Géoplateforme.
+        "IGN Carte topographique": L.tileLayer(
+            IGN_BASE + "&LAYER=GEOGRAPHICALGRIDSYSTEMS.MAPS.BDUNI.J1&FORMAT=image/png",
+            { maxZoom: 18, attribution: "© IGN - Géoplateforme" }),
+
+        "Photos aériennes IGN": L.tileLayer(
+            IGN_BASE + "&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&FORMAT=image/jpeg",
+            { maxZoom: 19, attribution: "© IGN - Géoplateforme" })
+    };
+
+    var map = L.map("map", {
+        center: [48.9315, 1.4402],   // Vallée de la Seine, zone des GPX d'exemple
+        zoom: 13,
+        zoomControl: true,
+        layers: [layers["Plan (OpenStreetMap)"]]
+    });
+
+    L.control.layers(layers, {}, { position: "topright" }).addTo(map);
+    L.control.scale({ imperial: false, position: "bottomright" }).addTo(map);
+
+    // --- Pont Python <-> JavaScript ----------------------------------------
+    var bridge = null;
+
+    function formatCoord(latlng) {
+        return latlng.lat.toFixed(5) + " ; " + latlng.lng.toFixed(5);
+    }
+
+    function setStatus(text) {
+        document.getElementById("status").textContent = text;
+    }
+
+    function reportView() {
+        var c = map.getCenter();
+        if (bridge) { bridge.js_view_changed(c.lat, c.lng, map.getZoom()); }
+    }
+
+    map.on("mousemove", function (e) {
+        setStatus(formatCoord(e.latlng) + "  |  zoom " + map.getZoom());
+    });
+
+    map.on("click", function (e) {
+        if (bridge) { bridge.js_map_click(e.latlng.lat, e.latlng.lng); }
+    });
+
+    map.on("moveend zoomend", reportView);
+
+    map.on("baselayerchange", function (e) {
+        if (bridge) { bridge.js_layer_changed(e.name); }
+    });
+
+    // --- API appelée depuis Python -----------------------------------------
+    window.carto = {
+        setView: function (lat, lon, zoom) {
+            map.setView([lat, lon], zoom === undefined ? map.getZoom() : zoom);
+        },
+        fitBounds: function (bounds) {
+            if (bounds && bounds.length === 2) {
+                map.fitBounds(bounds, { padding: [30, 30] });
+            }
+        },
+        setBaseLayer: function (name) {
+            if (!layers[name]) { return false; }
+            for (var key in layers) {
+                if (map.hasLayer(layers[key]) && key !== name) {
+                    map.removeLayer(layers[key]);
+                }
+            }
+            map.addLayer(layers[name]);
+            return true;
+        },
+        layerNames: function () { return Object.keys(layers); },
+        isReady: function () { return true; }
+    };
+
+    function connectBridge() {
+        if (typeof QWebChannel === "undefined" || !window.qt || !qt.webChannelTransport) {
+            setStatus("Carte prête (mode autonome)");
+            return;
+        }
+        new QWebChannel(qt.webChannelTransport, function (channel) {
+            bridge = channel.objects.bridge;
+            setStatus("Carte prête");
+            bridge.js_ready();
+            reportView();
+        });
+    }
+
+    window.addEventListener("load", connectBridge);
+    </script>
+</body>
+</html>

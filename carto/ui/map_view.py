@@ -1,0 +1,114 @@
+"""Vue cartographique interactive (Leaflet dans un QWebEngineView)."""
+
+from __future__ import annotations
+
+import json
+
+from PyQt6.QtCore import QObject, QUrl, pyqtSignal, pyqtSlot
+from PyQt6.QtWebChannel import QWebChannel
+from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+from ..config import resource_path
+
+#: Couches disponibles, dans l'ordre du sélecteur (identiques à map.html).
+LAYER_NAMES = [
+    "Plan (OpenStreetMap)",
+    "Aérienne / Satellite",
+    "IGN Plan",
+    "IGN Carte topographique",
+    "Photos aériennes IGN",
+]
+
+
+class MapBridge(QObject):
+    """Objet exposé au JavaScript via QWebChannel."""
+
+    ready = pyqtSignal()
+    clicked = pyqtSignal(float, float)
+    view_changed = pyqtSignal(float, float, int)
+    layer_changed = pyqtSignal(str)
+
+    @pyqtSlot()
+    def js_ready(self) -> None:
+        self.ready.emit()
+
+    @pyqtSlot(float, float)
+    def js_map_click(self, lat: float, lon: float) -> None:
+        self.clicked.emit(lat, lon)
+
+    @pyqtSlot(float, float, int)
+    def js_view_changed(self, lat: float, lon: float, zoom: int) -> None:
+        self.view_changed.emit(lat, lon, zoom)
+
+    @pyqtSlot(str)
+    def js_layer_changed(self, name: str) -> None:
+        self.layer_changed.emit(name)
+
+
+class _Page(QWebEnginePage):
+    """Page qui relaie la console JavaScript vers un signal Qt (débogage)."""
+
+    console = pyqtSignal(str)
+
+    def javaScriptConsoleMessage(self, level, message, line, source):  # noqa: N802
+        self.console.emit(f"[JS:{line}] {message}")
+
+
+class MapView(QWebEngineView):
+    """Carte interactive : couches, déplacement, zoom, clics."""
+
+    map_ready = pyqtSignal()
+    map_clicked = pyqtSignal(float, float)
+    view_changed = pyqtSignal(float, float, int)
+    layer_changed = pyqtSignal(str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.is_ready = False
+
+        self._page = _Page(self)
+        self.setPage(self._page)
+
+        settings = self._page.settings()
+        settings.setAttribute(
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True
+        )
+        settings.setAttribute(
+            QWebEngineSettings.WebAttribute.JavascriptEnabled, True
+        )
+        settings.setAttribute(
+            QWebEngineSettings.WebAttribute.ShowScrollBars, False
+        )
+
+        self.bridge = MapBridge()
+        self.bridge.ready.connect(self._on_ready)
+        self.bridge.clicked.connect(self.map_clicked)
+        self.bridge.view_changed.connect(self.view_changed)
+        self.bridge.layer_changed.connect(self.layer_changed)
+
+        self._channel = QWebChannel(self._page)
+        self._channel.registerObject("bridge", self.bridge)
+        self._page.setWebChannel(self._channel)
+
+        self.load(QUrl.fromLocalFile(str(resource_path("map.html"))))
+
+    # ------------------------------------------------------------------ API
+
+    def _on_ready(self) -> None:
+        self.is_ready = True
+        self.map_ready.emit()
+
+    def run_js(self, script: str) -> None:
+        self._page.runJavaScript(script)
+
+    def set_view(self, lat: float, lon: float, zoom: int | None = None) -> None:
+        zoom_arg = "undefined" if zoom is None else str(int(zoom))
+        self.run_js(f"carto.setView({lat!r}, {lon!r}, {zoom_arg});")
+
+    def fit_bounds(self, south_west: tuple, north_east: tuple) -> None:
+        bounds = json.dumps([list(south_west), list(north_east)])
+        self.run_js(f"carto.fitBounds({bounds});")
+
+    def set_base_layer(self, name: str) -> None:
+        self.run_js(f"carto.setBaseLayer({json.dumps(name)});")

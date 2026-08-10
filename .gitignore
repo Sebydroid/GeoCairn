@@ -1,0 +1,11 @@
+GPX exemples/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.spec
+*.db
+*.db-wal
+*.db-shm
