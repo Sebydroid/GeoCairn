@@ -17,6 +17,9 @@
             padding: 3px 8px; font: 12px "Segoe UI", Arial, sans-serif;
             color: #333; pointer-events: none;
         }
+        /* Mode édition : le curseur indique que le clic pose un point. */
+        .leaflet-container.mode-edition { cursor: crosshair; }
+        .leaflet-container.mode-edition .leaflet-interactive { cursor: crosshair; }
     </style>
 </head>
 <body>
@@ -95,6 +98,45 @@
         if (bridge) { bridge.js_layer_changed(e.name); }
     });
 
+    // Ctrl+Z depuis la carte : le QWebEngineView capte le clavier, la fenêtre
+    // Qt ne verrait pas le raccourci sans ce relais.
+    document.addEventListener("keydown", function (e) {
+        if (e.ctrlKey && (e.key === "z" || e.key === "Z")) {
+            e.preventDefault();
+            if (bridge) { bridge.js_undo_request(); }
+        }
+    });
+
+    // --- Trace en cours de saisie (brouillon) ------------------------------
+    var draft = {
+        latlngs: [],
+        line: L.polyline([], {
+            color: "#e6194b", weight: 4, opacity: 0.9
+        }),
+        vertices: L.layerGroup(),
+        editing: false
+    };
+    draft.line.addTo(map);
+    draft.vertices.addTo(map);
+
+    function vertexStyle(index) {
+        var isStart = index === 0;
+        return {
+            radius: isStart ? 6 : 4,
+            color: isStart ? "#1f8a3b" : "#e6194b",
+            fillColor: isStart ? "#2ecc71" : "#ffffff",
+            fillOpacity: 1,
+            weight: 2
+        };
+    }
+
+    function redrawVertices() {
+        draft.vertices.clearLayers();
+        for (var i = 0; i < draft.latlngs.length; i++) {
+            L.circleMarker(draft.latlngs[i], vertexStyle(i)).addTo(draft.vertices);
+        }
+    }
+
     // --- API appelée depuis Python -----------------------------------------
     window.carto = {
         setView: function (lat, lon, zoom) {
@@ -116,7 +158,53 @@
             return true;
         },
         layerNames: function () { return Object.keys(layers); },
-        isReady: function () { return true; }
+        isReady: function () { return true; },
+
+        // -- brouillon ------------------------------------------------------
+        setEditMode: function (on) {
+            draft.editing = !!on;
+            var container = map.getContainer();
+            if (draft.editing) {
+                L.DomUtil.addClass(container, "mode-edition");
+            } else {
+                L.DomUtil.removeClass(container, "mode-edition");
+            }
+            return draft.editing;
+        },
+        isEditMode: function () { return draft.editing; },
+
+        appendDraftPoint: function (lat, lon) {
+            draft.latlngs.push([lat, lon]);
+            draft.line.setLatLngs(draft.latlngs);
+            L.circleMarker([lat, lon], vertexStyle(draft.latlngs.length - 1))
+                .addTo(draft.vertices);
+            return draft.latlngs.length;
+        },
+
+        popDraftPoint: function () {
+            if (!draft.latlngs.length) { return 0; }
+            draft.latlngs.pop();
+            draft.line.setLatLngs(draft.latlngs);
+            redrawVertices();
+            return draft.latlngs.length;
+        },
+
+        setDraft: function (points) {
+            draft.latlngs = (points || []).map(function (p) { return [p[0], p[1]]; });
+            draft.line.setLatLngs(draft.latlngs);
+            redrawVertices();
+            return draft.latlngs.length;
+        },
+
+        clearDraft: function () {
+            draft.latlngs = [];
+            draft.line.setLatLngs([]);
+            draft.vertices.clearLayers();
+            return 0;
+        },
+
+        draftCount: function () { return draft.latlngs.length; },
+        draftPoints: function () { return draft.latlngs; }
     };
 
     function connectBridge() {

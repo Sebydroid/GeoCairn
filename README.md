@@ -31,6 +31,8 @@ pytest tests/
 | `carto/config.py` | Emplacement des données utilisateur (AppData) |
 | `carto/database.py` | Base SQLite : dossiers, traces, points |
 | `carto/models.py` | Structures de données (`Folder`, `Track`, `Point`) |
+| `carto/geo.py` | Distances, longueur d'une trace, rectangle englobant |
+| `carto/editor.py` | Trace brouillon maintenue en mémoire pendant la saisie |
 | `carto/ui/main_window.py` | Fenêtre principale (arborescence + carte) |
 | `carto/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
 | `carto/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
@@ -61,7 +63,22 @@ emplacement (utilisée par les tests).
   Géoplateforme et exige désormais une licence payante. La couche « IGN Carte
   topographique » (gratuite) le remplace ; son ajout restera possible plus tard
   si une clé est fournie.
-- Jalons 3 à 7 : à venir.
+- **Jalon 3 — Création de traces et interaction carte** : fait.
+  Bouton « Créer une trace » (mode saisie, curseur en croix), chaque clic gauche
+  ajoute un point, les points sont reliés par une polyligne, annulation du
+  dernier point (Ctrl+Z), effacement du brouillon, longueur cumulée affichée en
+  temps réel. Le brouillon est conservé en mémoire même après la sortie du mode
+  saisie.
+- Jalons 4 à 7 : à venir. La sauvegarde du brouillon en base arrive au Jalon 4.
+
+## Utilisation : créer une trace
+
+1. Cliquer sur **Créer une trace** dans la barre d'outils (ou `Ctrl+N`).
+2. Cliquer sur la carte pour poser les points ; ils se relient au fur et à
+   mesure, le départ est marqué en vert.
+3. `Ctrl+Z` annule le dernier point (le raccourci fonctionne aussi lorsque la
+   carte a le focus).
+4. Le nombre de points et la longueur cumulée s'affichent en bas à droite.
 
 ## Note technique
 

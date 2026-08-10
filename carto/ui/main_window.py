@@ -10,12 +10,14 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QSplitter,
+    QStyle,
     QToolBar,
 )
 
 from .. import APP_NAME, APP_VERSION
 from ..config import db_path
 from ..database import Database
+from ..editor import DraftTrack
 from .map_view import LAYER_NAMES, MapView
 from .tree_panel import TreePanel
 
@@ -30,6 +32,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"{APP_NAME} — Gestion de traces GPX")
         self.resize(1280, 800)
 
+        #: Trace en cours de saisie, conservée en mémoire (Jalon 3).
+        self.draft = DraftTrack()
+
         self.tree_panel = TreePanel(self.db, self)
         self.map_view = MapView(self)
 
@@ -42,6 +47,7 @@ class MainWindow(QMainWindow):
         splitter.setChildrenCollapsible(False)
         self.setCentralWidget(splitter)
 
+        self._build_actions()
         self._build_toolbar()
         self._build_menu()
         self._build_statusbar()
@@ -50,13 +56,60 @@ class MainWindow(QMainWindow):
         self.map_view.view_changed.connect(self._on_view_changed)
         self.map_view.map_clicked.connect(self._on_map_clicked)
         self.map_view.layer_changed.connect(self._on_layer_changed_from_map)
+        self.map_view.undo_requested.connect(self.undo_last_point)
+
+        self._update_draft_actions()
 
     # ------------------------------------------------------------ interface
+
+    def _build_actions(self) -> None:
+        style = self.style()
+
+        self.action_create = QAction("Créer une trace", self)
+        self.action_create.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder)
+        )
+        self.action_create.setCheckable(True)
+        self.action_create.setShortcut("Ctrl+N")
+        self.action_create.setToolTip(
+            "Mode saisie : chaque clic gauche sur la carte ajoute un point (Ctrl+N)"
+        )
+        self.action_create.toggled.connect(self.set_edit_mode)
+
+        self.action_undo = QAction("Annuler le dernier point", self)
+        self.action_undo.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_ArrowBack)
+        )
+        self.action_undo.setShortcut(QKeySequence.StandardKey.Undo)
+        # Le QWebEngineView capte le clavier : sans ce contexte, Ctrl+Z ne
+        # remonterait pas jusqu'à la fenêtre.
+        self.action_undo.setShortcutContext(
+            Qt.ShortcutContext.ApplicationShortcut
+        )
+        self.action_undo.triggered.connect(self.undo_last_point)
+
+        self.action_clear = QAction("Effacer le brouillon", self)
+        self.action_clear.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton)
+        )
+        # triggered() transmet un booléen « checked » : sans lambda, il serait
+        # reçu comme `confirm` et sauterait la demande de confirmation.
+        self.action_clear.triggered.connect(lambda: self.clear_draft())
+
+        self.addAction(self.action_undo)
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Barre d'outils", self)
         toolbar.setMovable(False)
+        toolbar.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
         self.addToolBar(toolbar)
+
+        toolbar.addAction(self.action_create)
+        toolbar.addAction(self.action_undo)
+        toolbar.addAction(self.action_clear)
+        toolbar.addSeparator()
 
         toolbar.addWidget(QLabel("  Fond de carte : "))
         self.layer_combo = QComboBox(self)
@@ -74,6 +127,11 @@ class MainWindow(QMainWindow):
         quit_action.triggered.connect(self.close)
         file_menu.addAction(quit_action)
 
+        edit_menu = menu.addMenu("&Trace")
+        edit_menu.addAction(self.action_create)
+        edit_menu.addAction(self.action_undo)
+        edit_menu.addAction(self.action_clear)
+
         view_menu = menu.addMenu("&Affichage")
         refresh_action = QAction("&Actualiser l'arborescence", self)
         refresh_action.setShortcut("F5")
@@ -88,19 +146,93 @@ class MainWindow(QMainWindow):
     def _build_statusbar(self) -> None:
         self.coord_label = QLabel("—", self)
         self.status_label = QLabel("Initialisation…", self)
+        self.draft_label = QLabel(self.draft.summary(), self)
         self.statusBar().addWidget(self.status_label, 1)
+        self.statusBar().addPermanentWidget(self.draft_label)
         self.statusBar().addPermanentWidget(self.coord_label)
+
+    # ------------------------------------------------------- édition (J3)
+
+    @property
+    def edit_mode(self) -> bool:
+        return self.action_create.isChecked()
+
+    def set_edit_mode(self, enabled: bool) -> None:
+        """Active ou quitte le mode saisie ; le brouillon reste en mémoire."""
+        if self.action_create.isChecked() != enabled:
+            self.action_create.setChecked(enabled)
+            return  # toggled() rappellera cette méthode
+        self.map_view.set_edit_mode(enabled)
+        if enabled:
+            self.status_label.setText(
+                "Mode saisie : cliquez sur la carte pour ajouter des points."
+            )
+        else:
+            self.status_label.setText("Mode saisie désactivé.")
+        self._update_draft_actions()
+
+    def add_draft_point(self, lat: float, lon: float) -> None:
+        """Ajoute un point au brouillon (mémoire) et à la carte (affichage)."""
+        self.draft.add_point(lat, lon)
+        self.map_view.append_draft_point(lat, lon)
+        self.status_label.setText(f"Point ajouté : {lat:.5f} ; {lon:.5f}")
+        self._update_draft_actions()
+
+    def undo_last_point(self) -> None:
+        """Retire le dernier point ajouté (Ctrl+Z)."""
+        removed = self.draft.undo_last()
+        if removed is None:
+            self.status_label.setText("Aucun point à annuler.")
+            return
+        self.map_view.pop_draft_point()
+        self.status_label.setText(
+            f"Point annulé : {removed.lat:.5f} ; {removed.lon:.5f}"
+        )
+        self._update_draft_actions()
+
+    def clear_draft(self, confirm: bool = True) -> None:
+        """Vide le brouillon, après confirmation s'il contient des points."""
+        if self.draft.is_empty:
+            return
+        if confirm:
+            answer = QMessageBox.question(
+                self,
+                "Effacer le brouillon",
+                f"Effacer les {len(self.draft)} points de la trace en cours ?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self.draft.clear()
+        self.map_view.clear_draft()
+        self.status_label.setText("Brouillon effacé.")
+        self._update_draft_actions()
+
+    def _update_draft_actions(self) -> None:
+        """Reflète l'état du brouillon dans la barre d'état et les actions."""
+        has_points = not self.draft.is_empty
+        self.action_undo.setEnabled(has_points)
+        self.action_clear.setEnabled(has_points)
+        self.draft_label.setText(self.draft.summary())
 
     # -------------------------------------------------------------- signaux
 
     def _on_map_ready(self) -> None:
         self.status_label.setText("Carte prête.")
+        # Réapplique l'état courant à une carte fraîchement chargée.
+        self.map_view.set_edit_mode(self.edit_mode)
+        if not self.draft.is_empty:
+            self.map_view.set_draft(self.draft.points)
 
     def _on_view_changed(self, lat: float, lon: float, zoom: int) -> None:
         self.coord_label.setText(f"Centre : {lat:.5f} ; {lon:.5f}  —  zoom {zoom}")
 
     def _on_map_clicked(self, lat: float, lon: float) -> None:
-        self.status_label.setText(f"Point cliqué : {lat:.5f} ; {lon:.5f}")
+        if self.edit_mode:
+            self.add_draft_point(lat, lon)
+        else:
+            self.status_label.setText(f"Point cliqué : {lat:.5f} ; {lon:.5f}")
 
     def _on_layer_changed_from_map(self, name: str) -> None:
         """Garde le sélecteur de la barre d'outils synchronisé avec la carte."""

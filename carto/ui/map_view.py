@@ -28,10 +28,15 @@ class MapBridge(QObject):
     clicked = pyqtSignal(float, float)
     view_changed = pyqtSignal(float, float, int)
     layer_changed = pyqtSignal(str)
+    undo_requested = pyqtSignal()
 
     @pyqtSlot()
     def js_ready(self) -> None:
         self.ready.emit()
+
+    @pyqtSlot()
+    def js_undo_request(self) -> None:
+        self.undo_requested.emit()
 
     @pyqtSlot(float, float)
     def js_map_click(self, lat: float, lon: float) -> None:
@@ -62,6 +67,7 @@ class MapView(QWebEngineView):
     map_clicked = pyqtSignal(float, float)
     view_changed = pyqtSignal(float, float, int)
     layer_changed = pyqtSignal(str)
+    undo_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -86,6 +92,7 @@ class MapView(QWebEngineView):
         self.bridge.clicked.connect(self.map_clicked)
         self.bridge.view_changed.connect(self.view_changed)
         self.bridge.layer_changed.connect(self.layer_changed)
+        self.bridge.undo_requested.connect(self.undo_requested)
 
         self._channel = QWebChannel(self._page)
         self._channel.registerObject("bridge", self.bridge)
@@ -112,3 +119,25 @@ class MapView(QWebEngineView):
 
     def set_base_layer(self, name: str) -> None:
         self.run_js(f"carto.setBaseLayer({json.dumps(name)});")
+
+    # -------------------------------------------------------------- brouillon
+
+    def set_edit_mode(self, enabled: bool) -> None:
+        """Active le mode saisie (curseur en croix sur la carte)."""
+        self.run_js(f"carto.setEditMode({str(bool(enabled)).lower()});")
+
+    def append_draft_point(self, lat: float, lon: float) -> None:
+        """Ajoute un point à la polyligne du brouillon."""
+        self.run_js(f"carto.appendDraftPoint({lat!r}, {lon!r});")
+
+    def pop_draft_point(self) -> None:
+        """Retire le dernier point de la polyligne du brouillon."""
+        self.run_js("carto.popDraftPoint();")
+
+    def set_draft(self, points) -> None:
+        """Réaffiche entièrement le brouillon à partir d'une liste de points."""
+        coords = json.dumps([[p.lat, p.lon] for p in points])
+        self.run_js(f"carto.setDraft({coords});")
+
+    def clear_draft(self) -> None:
+        self.run_js("carto.clearDraft();")
