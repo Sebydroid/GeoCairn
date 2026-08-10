@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+#: Couleur des traces enregistrées (bleu), distincte du brouillon en cours de
+#: saisie (rouge) : les deux peuvent être affichés en même temps.
+DEFAULT_TRACK_COLOR = "#1f5fbf"
+
+
 @dataclass(frozen=True)
 class Point:
     """Un point GPS d'une trace."""
@@ -34,7 +39,7 @@ class Track:
     id: int
     name: str
     folder_id: int | None = None
-    color: str = "#e6194b"
+    color: str = DEFAULT_TRACK_COLOR
     description: str = ""
     is_loop: bool = False
     point_count: int = 0

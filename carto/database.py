@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from .config import db_path
-from .models import Folder, Point, Track
+from .models import DEFAULT_TRACK_COLOR, Folder, Point, Track
 
 SCHEMA_VERSION = 1
 
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
     folder_id   INTEGER REFERENCES folders(id) ON DELETE CASCADE,
-    color       TEXT    NOT NULL DEFAULT '#e6194b',
+    color       TEXT    NOT NULL DEFAULT '#1f5fbf',
     description TEXT    NOT NULL DEFAULT '',
     is_loop     INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -60,6 +60,10 @@ class DuplicateNameError(ValueError):
 
 class NotFoundError(LookupError):
     """L'élément demandé n'existe pas."""
+
+
+class CycleError(ValueError):
+    """Le déplacement demandé rendrait un dossier descendant de lui-même."""
 
 
 class Database:
@@ -168,6 +172,45 @@ class Database:
         with self.conn:
             self.conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
 
+    def folder_ancestors(self, folder_id: int) -> list[int]:
+        """Identifiants des dossiers parents, du plus proche à la racine."""
+        ancestors: list[int] = []
+        current = self.get_folder(folder_id)
+        while current is not None and current.parent_id is not None:
+            ancestors.append(current.parent_id)
+            current = self.get_folder(current.parent_id)
+        return ancestors
+
+    def move_folder(self, folder_id: int, parent_id: int | None) -> None:
+        """Déplace un dossier sous un autre parent (glisser-déposer).
+
+        Refuse de créer un cycle : un dossier ne peut pas devenir son propre
+        descendant, sans quoi la branche disparaîtrait de l'arborescence.
+        """
+        if self.get_folder(folder_id) is None:
+            raise NotFoundError(f"Dossier {folder_id} introuvable.")
+        if parent_id is not None:
+            if self.get_folder(parent_id) is None:
+                raise NotFoundError(f"Dossier {parent_id} introuvable.")
+            if parent_id == folder_id:
+                raise CycleError("Un dossier ne peut pas être placé dans lui-même.")
+            if folder_id in self.folder_ancestors(parent_id):
+                raise CycleError(
+                    "Un dossier ne peut pas être placé dans l'un de ses "
+                    "sous-dossiers."
+                )
+        try:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE folders SET parent_id = ? WHERE id = ?",
+                    (parent_id, folder_id),
+                )
+        except sqlite3.IntegrityError as exc:
+            name = self.get_folder(folder_id).name
+            raise DuplicateNameError(
+                f"Un dossier nommé « {name} » existe déjà à cet emplacement."
+            ) from exc
+
     # ----------------------------------------------------------------- traces
 
     def create_track(
@@ -175,7 +218,7 @@ class Database:
         name: str,
         folder_id: int | None = None,
         points: Sequence[Point] | None = None,
-        color: str = "#e6194b",
+        color: str = DEFAULT_TRACK_COLOR,
         description: str = "",
         is_loop: bool = False,
     ) -> int:

@@ -2,8 +2,8 @@
 
     python tests/snapshot_window.py [fichier.png]
 
-La zone carte apparaît vide sur la capture : son contenu est rendu par un
-processus séparé (Chromium) que Qt ne restitue pas dans un grab().
+Alimente l'application avec les GPX d'exemple du projet s'ils sont présents,
+affiche la première trace importée, puis capture la fenêtre.
 """
 
 from __future__ import annotations
@@ -14,46 +14,51 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PyQt6.QtCore import QTimer  # noqa: E402
+from PyQt6.QtWidgets import QMessageBox  # noqa: E402
 
 from carto.app import create_app  # noqa: E402
 from carto.database import Database  # noqa: E402
 from carto.ui.main_window import MainWindow  # noqa: E402
 
+EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
+
 
 def main() -> int:
     destination = Path(sys.argv[1] if len(sys.argv) > 1 else "interface.png")
+    base = Path("apercu-carto.db")
+    base.unlink(missing_ok=True)
 
     app = create_app(["carto"])
-    database = Database(Path(app.applicationName() + "-apercu.db"))
+    # Aucune boîte de dialogue ne doit interrompre la capture.
+    QMessageBox.warning = staticmethod(lambda *a, **k: None)
+
+    database = Database(base)
     window = MainWindow(db=database)
     window.resize(1100, 620)
     window.show()
 
-    # Jeu de démonstration : deux dossiers, une trace, un brouillon en cours.
     panel = window.tree_panel
-    alpes = database.create_folder("Randonnées")
-    database.create_folder("2026", parent_id=alpes)
-    database.create_track(
-        "Boucle de Bueil",
-        folder_id=alpes,
-        points=[],
-    )
+    dossier = database.create_folder("Rallye 2016")
     panel.refresh()
-    panel.select_folder(alpes)
+    panel.select_folder(dossier)
 
-    window.set_edit_mode(True)
-    for lat, lon in [(48.9394, 1.4392), (48.9388, 1.4370), (48.9379, 1.4373)]:
-        window.add_draft_point(lat, lon)
+    fichiers = [str(f) for f in sorted(EXEMPLES.glob("*.gpx"))]
+    importees = window.import_gpx(fichiers) if fichiers else []
+    if importees:
+        window.display_track(importees[0])
 
     def capture() -> None:
         window.grab().save(str(destination))
-        print(f"capture écrite : {destination.resolve()}", flush=True)
+        print(f"traces importées : {len(importees)}", flush=True)
+        print(f"statut           : {window.status_label.text()}", flush=True)
+        print(f"capture écrite   : {destination.resolve()}", flush=True)
         app.quit()
 
-    QTimer.singleShot(4000, capture)
+    QTimer.singleShot(5000, capture)
     code = app.exec()
     database.close()
-    Path(app.applicationName() + "-apercu.db").unlink(missing_ok=True)
+    for suffixe in ("", "-wal", "-shm"):
+        Path(str(base) + suffixe).unlink(missing_ok=True)
     return code
 
 

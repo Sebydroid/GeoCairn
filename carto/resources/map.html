@@ -137,6 +137,14 @@
         }
     }
 
+    // --- Trace enregistrée affichée sur la carte ---------------------------
+    var shown = {
+        line: L.polyline([], { color: "#1f5fbf", weight: 4, opacity: 0.9 }),
+        ends: L.layerGroup()
+    };
+    shown.line.addTo(map);
+    shown.ends.addTo(map);
+
     // --- API appelée depuis Python -----------------------------------------
     window.carto = {
         setView: function (lat, lon, zoom) {
@@ -204,7 +212,41 @@
         },
 
         draftCount: function () { return draft.latlngs.length; },
-        draftPoints: function () { return draft.latlngs; }
+        draftPoints: function () { return draft.latlngs; },
+
+        // -- trace enregistree affichee -------------------------------------
+        showTrack: function (points, color, fit) {
+            var latlngs = (points || []).map(function (p) { return [p[0], p[1]]; });
+            shown.line.setLatLngs(latlngs);
+            shown.line.setStyle({ color: color || "#1f5fbf" });
+            shown.ends.clearLayers();
+
+            if (latlngs.length) {
+                L.circleMarker(latlngs[0], {
+                    radius: 7, color: "#1f8a3b", fillColor: "#2ecc71",
+                    fillOpacity: 1, weight: 2
+                }).addTo(shown.ends).bindTooltip("Départ");
+
+                var last = latlngs[latlngs.length - 1];
+                L.circleMarker(last, {
+                    radius: 7, color: "#8a1f1f", fillColor: "#e74c3c",
+                    fillOpacity: 1, weight: 2
+                }).addTo(shown.ends).bindTooltip("Arrivée");
+
+                if (fit !== false) {
+                    map.fitBounds(shown.line.getBounds(), { padding: [40, 40] });
+                }
+            }
+            return latlngs.length;
+        },
+
+        clearTrack: function () {
+            shown.line.setLatLngs([]);
+            shown.ends.clearLayers();
+            return 0;
+        },
+
+        shownCount: function () { return shown.line.getLatLngs().length; }
     };
 
     function connectBridge() {

@@ -33,7 +33,7 @@ pytest tests/
 | `carto/models.py` | Structures de données (`Folder`, `Track`, `Point`) |
 | `carto/geo.py` | Distances, longueur d'une trace, rectangle englobant |
 | `carto/editor.py` | Trace brouillon maintenue en mémoire pendant la saisie |
-| `carto/gpx.py` | Export au format GPX 1.1 |
+| `carto/gpx.py` | Lecture et écriture du format GPX |
 | `carto/ui/main_window.py` | Fenêtre principale (arborescence + carte) |
 | `carto/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
 | `carto/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
@@ -74,7 +74,10 @@ emplacement (utilisée par les tests).
   Enregistrement du brouillon en base (`Ctrl+S`), création / renommage /
   suppression de dossiers et sous-dossiers, glisser-déposer d'une trace vers un
   dossier, menu contextuel au clic droit, export GPX 1.1.
-- Jalons 5 à 7 : à venir (import GPX, édition avancée, packaging `.exe`).
+- **Jalon 5 — Import et affichage des traces existantes** : fait.
+  Import d'un ou plusieurs fichiers GPX (`Ctrl+I`), double-clic sur une trace
+  pour l'afficher et cadrer la carte dessus, repères de départ et d'arrivée.
+- Jalons 6 et 7 : à venir (édition avancée, packaging `.exe`).
 
 ## Utilisation
 
@@ -94,15 +97,31 @@ emplacement (utilisée par les tests).
 - **Nouveau dossier** crée un sous-dossier dans la sélection courante. Deux
   dossiers de même nom ne peuvent pas coexister au même niveau.
 - Le **clic droit** ouvre un menu : renommer, supprimer, exporter en GPX.
-- Une trace se **glisse-dépose** vers un dossier. Les dossiers, eux, ne se
-  déplacent pas : le plan ne le prévoit pas à ce stade.
+- Traces **et** dossiers se **glissent-déposent**. Un dossier ne peut pas être
+  déposé dans lui-même ni dans l'un de ses sous-dossiers : le dépôt est refusé
+  dès le survol.
 - Supprimer un dossier supprime aussi son contenu, après confirmation.
 
-### Exporter
+### Consulter une trace
 
-Clic droit sur une trace → **Exporter en GPX…**, ou menu *Fichier*. Le fichier
-produit est du GPX 1.1 standard, relisible par les autres logiciels de
-randonnée.
+Double-cliquer sur une trace l'affiche en bleu et cadre la carte dessus, avec un
+repère vert au départ et rouge à l'arrivée. La barre d'état indique le nombre de
+points et la distance. Le brouillon en cours de saisie (rouge) reste visible :
+les deux couleurs permettent de ne pas les confondre.
+
+### Importer et exporter
+
+- **Importer un GPX** (`Ctrl+I`) accepte plusieurs fichiers d'un coup et les
+  range dans le dossier sélectionné. Un fichier contenant plusieurs `<trk>`
+  donne autant de traces. Les fichiers illisibles sont signalés sans
+  interrompre l'import des autres.
+- Clic droit sur une trace → **Exporter en GPX…**, ou menu *Fichier*. Le fichier
+  produit est du GPX 1.1 standard, relisible par les autres logiciels de
+  randonnée.
+
+**Points d'intérêt non gérés.** Un GPX ne contenant que des `<wpt>` (relevé de
+points remarquables, sans itinéraire) n'a rien à importer : Carto l'explique au
+lieu d'échouer en silence. Le stockage des points d'intérêt n'est pas au plan.
 
 ## Note technique
 

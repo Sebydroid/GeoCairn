@@ -19,6 +19,7 @@ from carto.ui.tree_panel import (
     ROLE_KIND,
     TreePanel,
     folder_of,
+    is_self_or_descendant,
 )
 
 NS = {"gpx": GPX_NS}
@@ -221,12 +222,11 @@ def test_depot_reel_sur_un_dossier(panel, db, sample_points):
     assert db.get_track(track_id).folder_id == folder_id
 
 
-def test_un_dossier_ne_peut_pas_etre_glisse(panel, db):
-    """Le plan ne prévoit le déplacement que des traces."""
+def test_un_dossier_peut_etre_glisse(panel, db):
     folder_id = panel.create_folder("Alpes")
     item = panel.find_item(KIND_FOLDER, folder_id)
 
-    assert not (item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
+    assert bool(item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
 
 
 def test_une_trace_peut_etre_glissee(panel, db, sample_points):
@@ -235,6 +235,134 @@ def test_une_trace_peut_etre_glissee(panel, db, sample_points):
     item = panel.find_item(KIND_TRACK, track_id)
 
     assert bool(item.flags() & Qt.ItemFlag.ItemIsDragEnabled)
+
+
+# ------------------------------------------- glisser-déposer des dossiers
+
+
+def test_deplacement_de_dossier_dans_un_autre(panel, db):
+    alpes = panel.create_folder("Alpes")
+    panel.select_folder(None)
+    jura = panel.create_folder("Jura")
+
+    assert panel.move_folder(jura, alpes) is True
+
+    assert db.get_folder(jura).parent_id == alpes
+    assert item_labels(panel) == ["Alpes"]
+    assert item_labels(panel, panel.find_item(KIND_FOLDER, alpes)) == ["Jura"]
+
+
+def test_dossier_deplace_emporte_son_contenu(panel, db, sample_points):
+    alpes = panel.create_folder("Alpes")
+    sous = panel.create_folder("2026")
+    track_id = db.create_track("Trace", folder_id=sous, points=sample_points)
+    panel.select_folder(None)
+    jura = panel.create_folder("Jura")
+
+    panel.move_folder(alpes, jura)
+
+    assert db.get_folder(alpes).parent_id == jura
+    assert db.get_folder(sous).parent_id == alpes  # inchangé
+    assert db.get_track(track_id).folder_id == sous
+
+
+def test_remontee_d_un_dossier_a_la_racine(panel, db):
+    alpes = panel.create_folder("Alpes")
+    sous = panel.create_folder("2026")
+
+    assert panel.move_folder(sous, None) is True
+    assert db.get_folder(sous).parent_id is None
+
+
+def test_dossier_ne_peut_pas_aller_dans_lui_meme(panel, db, silence_dialogs):
+    alpes = panel.create_folder("Alpes")
+
+    assert panel.move_folder(alpes, alpes) is False
+    assert db.get_folder(alpes).parent_id is None
+
+
+def test_dossier_ne_peut_pas_aller_dans_son_sous_dossier(panel, db, silence_dialogs):
+    """Sinon la branche entière disparaîtrait de l'arborescence."""
+    alpes = panel.create_folder("Alpes")
+    sous = panel.create_folder("2026")
+
+    assert panel.move_folder(alpes, sous) is False
+    assert db.get_folder(alpes).parent_id is None
+    assert db.get_folder(sous).parent_id == alpes
+    assert any("sous-dossier" in text for _titre, text in silence_dialogs)
+
+
+def test_deplacement_refuse_si_le_nom_est_deja_pris(panel, db, silence_dialogs):
+    alpes = panel.create_folder("Alpes")
+    panel.create_folder("2026")
+    panel.select_folder(None)
+    jura = panel.create_folder("Jura")
+    doublon = panel.create_folder("2026")  # dans Jura
+
+    assert panel.move_folder(doublon, alpes) is False
+    assert db.get_folder(doublon).parent_id == jura
+
+
+def test_detection_d_ascendance_dans_l_arbre(panel, db):
+    alpes = panel.create_folder("Alpes")
+    sous = panel.create_folder("2026")
+    panel.select_folder(None)
+    jura = panel.create_folder("Jura")
+
+    item_alpes = panel.find_item(KIND_FOLDER, alpes)
+    item_sous = panel.find_item(KIND_FOLDER, sous)
+    item_jura = panel.find_item(KIND_FOLDER, jura)
+
+    assert is_self_or_descendant(item_alpes, item_alpes) is True
+    assert is_self_or_descendant(item_sous, item_alpes) is True
+    assert is_self_or_descendant(item_jura, item_alpes) is False
+    assert is_self_or_descendant(None, item_alpes) is False
+
+
+def test_depot_reel_d_un_dossier(panel, db):
+    """Simule un vrai QDropEvent sur un dossier cible."""
+    alpes = panel.create_folder("Alpes")
+    panel.select_folder(None)
+    jura = panel.create_folder("Jura")
+
+    panel.tree.setCurrentItem(panel.find_item(KIND_FOLDER, jura))
+    cible = QPointF(
+        panel.tree.visualItemRect(panel.find_item(KIND_FOLDER, alpes)).center()
+    )
+    panel.tree.dropEvent(
+        QDropEvent(
+            cible,
+            Qt.DropAction.MoveAction,
+            QMimeData(),
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
+
+    assert db.get_folder(jura).parent_id == alpes
+
+
+def test_depot_d_un_dossier_sur_sa_descendance_ignore(panel, db):
+    """Le dépôt est refusé au niveau de la vue, sans même toucher la base."""
+    alpes = panel.create_folder("Alpes")
+    sous = panel.create_folder("2026")
+    panel.find_item(KIND_FOLDER, alpes).setExpanded(True)
+
+    panel.tree.setCurrentItem(panel.find_item(KIND_FOLDER, alpes))
+    cible = QPointF(
+        panel.tree.visualItemRect(panel.find_item(KIND_FOLDER, sous)).center()
+    )
+    event = QDropEvent(
+        cible,
+        Qt.DropAction.MoveAction,
+        QMimeData(),
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    panel.tree.dropEvent(event)
+
+    assert event.isAccepted() is False
+    assert db.get_folder(alpes).parent_id is None
 
 
 # ------------------------------------------------ sauvegarde du brouillon

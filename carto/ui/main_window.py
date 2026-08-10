@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
@@ -20,7 +22,14 @@ from .. import APP_NAME, APP_VERSION
 from ..config import db_path
 from ..database import Database
 from ..editor import DraftTrack
-from ..gpx import safe_filename, write_gpx
+from ..geo import format_length, total_length
+from ..gpx import (
+    GpxParseError,
+    count_waypoints,
+    parse_gpx,
+    safe_filename,
+    write_gpx,
+)
 from .map_view import LAYER_NAMES, MapView
 from .tree_panel import KIND_TRACK, TreePanel
 
@@ -37,6 +46,8 @@ class MainWindow(QMainWindow):
 
         #: Trace en cours de saisie, conservée en mémoire (Jalon 3).
         self.draft = DraftTrack()
+        #: Trace enregistrée actuellement affichée sur la carte (Jalon 5).
+        self.displayed_track_id: int | None = None
 
         self.tree_panel = TreePanel(self.db, self)
         self.map_view = MapView(self)
@@ -63,6 +74,7 @@ class MainWindow(QMainWindow):
 
         self.tree_panel.export_requested.connect(self.export_track)
         self.tree_panel.status_message.connect(self.status_label.setText)
+        self.tree_panel.track_activated.connect(self.display_track)
 
         self._update_draft_actions()
 
@@ -117,6 +129,16 @@ class MainWindow(QMainWindow):
         # reçu comme `confirm` et sauterait la demande de confirmation.
         self.action_clear.triggered.connect(lambda: self.clear_draft())
 
+        self.action_import = QAction("Importer un GPX", self)
+        self.action_import.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
+        )
+        self.action_import.setShortcut("Ctrl+I")
+        self.action_import.setToolTip(
+            "Importer un ou plusieurs fichiers GPX dans le dossier sélectionné"
+        )
+        self.action_import.triggered.connect(lambda: self.import_gpx())
+
         self.action_new_folder = QAction("Nouveau dossier", self)
         self.action_new_folder.setIcon(
             style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder)
@@ -141,6 +163,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.action_save)
         toolbar.addAction(self.action_clear)
         toolbar.addSeparator()
+        toolbar.addAction(self.action_import)
         toolbar.addAction(self.action_new_folder)
         toolbar.addSeparator()
 
@@ -155,6 +178,7 @@ class MainWindow(QMainWindow):
         menu = self.menuBar()
 
         file_menu = menu.addMenu("&Fichier")
+        file_menu.addAction(self.action_import)
         export_action = QAction("&Exporter la trace sélectionnée en GPX…", self)
         export_action.triggered.connect(self._export_selected_track)
         file_menu.addAction(export_action)
@@ -296,6 +320,84 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"Trace « {name} » enregistrée.")
         return track_id
 
+    # ------------------------------------------- import et affichage (J5)
+
+    def import_gpx(self, paths: list[str] | None = None) -> list[int]:
+        """Importe un ou plusieurs fichiers GPX dans le dossier sélectionné.
+
+        `paths` sert aux tests ; sans lui, une boîte de dialogue est ouverte.
+        Retourne les identifiants des traces créées.
+        """
+        if paths is None:
+            paths, _filter = QFileDialog.getOpenFileNames(
+                self, "Importer des fichiers GPX", "", "Fichiers GPX (*.gpx)"
+            )
+            if not paths:
+                return []
+
+        folder_id = self.tree_panel.current_folder_id()
+        created: list[int] = []
+        problemes: list[str] = []
+
+        for path in paths:
+            try:
+                tracks = parse_gpx(path)
+            except GpxParseError as exc:
+                problemes.append(str(exc))
+                continue
+            if not tracks:
+                nom = Path(path).name
+                reperes = count_waypoints(path)
+                if reperes:
+                    problemes.append(
+                        f"{nom} ne contient aucune trace, seulement {reperes} "
+                        "points d'intérêt (non gérés pour l'instant)."
+                    )
+                else:
+                    problemes.append(f"{nom} ne contient aucune trace.")
+                continue
+            for track in tracks:
+                created.append(
+                    self.db.create_track(
+                        track.name,
+                        folder_id=folder_id,
+                        points=track.points,
+                        description=track.description,
+                    )
+                )
+
+        if created:
+            self.tree_panel.refresh()
+            self.tree_panel.select_track(created[-1])
+            self.display_track(created[-1])
+            self.status_label.setText(
+                f"{len(created)} trace(s) importée(s) depuis "
+                f"{len(paths)} fichier(s)."
+            )
+
+        if problemes:
+            QMessageBox.warning(
+                self,
+                "Import partiel" if created else "Import impossible",
+                "\n".join(problemes),
+            )
+        return created
+
+    def display_track(self, track_id: int) -> bool:
+        """Affiche une trace enregistrée et cadre la carte dessus."""
+        track = self.db.get_track(track_id, with_points=True)
+        if track is None or not track.points:
+            self.status_label.setText("Cette trace ne contient aucun point.")
+            return False
+
+        self.map_view.show_track(track.points, track.color)
+        self.displayed_track_id = track_id
+        longueur = format_length(total_length(track.points))
+        self.status_label.setText(
+            f"« {track.name} » — {track.point_count} points, {longueur}"
+        )
+        return True
+
     # ---------------------------------------------------- export GPX (J4)
 
     def _export_selected_track(self) -> None:
@@ -356,6 +458,8 @@ class MainWindow(QMainWindow):
         self.map_view.set_edit_mode(self.edit_mode)
         if not self.draft.is_empty:
             self.map_view.set_draft(self.draft.points)
+        if self.displayed_track_id is not None:
+            self.display_track(self.displayed_track_id)
 
     def _on_view_changed(self, lat: float, lon: float, zoom: int) -> None:
         self.coord_label.setText(f"Centre : {lat:.5f} ; {lon:.5f}  —  zoom {zoom}")

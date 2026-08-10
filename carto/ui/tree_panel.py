@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..database import Database, DuplicateNameError
+from ..database import CycleError, Database, DuplicateNameError
 
 #: Rôles de données portés par les items de l'arbre.
 ROLE_KIND = Qt.ItemDataRole.UserRole
@@ -35,15 +35,25 @@ def folder_of(item: QTreeWidgetItem | None) -> int | None:
     return None
 
 
+def is_self_or_descendant(candidate: QTreeWidgetItem | None,
+                          ancestor: QTreeWidgetItem) -> bool:
+    """Vrai si `candidate` est `ancestor` ou l'un de ses descendants."""
+    while candidate is not None:
+        if candidate is ancestor:
+            return True
+        candidate = candidate.parent()
+    return False
+
+
 class _TreeWidget(QTreeWidget):
-    """QTreeWidget acceptant le dépôt d'une trace sur un dossier.
+    """QTreeWidget acceptant le dépôt d'une trace ou d'un dossier.
 
     Le déplacement n'est pas appliqué par Qt : il est signalé, écrit en base,
     puis l'arbre est reconstruit. Une seule source de vérité, pas de risque de
     divergence entre l'affichage et les données.
     """
 
-    track_dropped = pyqtSignal(int, object)
+    item_dropped = pyqtSignal(str, int, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -52,28 +62,45 @@ class _TreeWidget(QTreeWidget):
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
 
-    def _dragged_track_id(self) -> int | None:
+    def _dragged_item(self) -> QTreeWidgetItem | None:
         item = self.currentItem()
-        if item is None or item.data(0, ROLE_KIND) != KIND_TRACK:
+        if item is None or item.data(0, ROLE_KIND) not in (KIND_TRACK, KIND_FOLDER):
             return None
-        return int(item.data(0, ROLE_ID))
+        return item
+
+    def _drop_is_allowed(self, dragged: QTreeWidgetItem | None, target) -> bool:
+        if dragged is None:
+            return False
+        if dragged.data(0, ROLE_KIND) != KIND_FOLDER:
+            return True
+        # Déposer un dossier dans lui-même ou dans sa propre descendance
+        # ferait disparaître la branche : on refuse dès le survol.
+        return not is_self_or_descendant(target, dragged)
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
-        if self._dragged_track_id() is None:
+        dragged = self._dragged_item()
+        target = self.itemAt(event.position().toPoint())
+        if not self._drop_is_allowed(dragged, target):
             event.ignore()
             return
         event.setDropAction(Qt.DropAction.MoveAction)
         event.accept()
 
     def dropEvent(self, event) -> None:  # noqa: N802
-        track_id = self._dragged_track_id()
-        if track_id is None:
+        dragged = self._dragged_item()
+        target = self.itemAt(event.position().toPoint())
+        if not self._drop_is_allowed(dragged, target):
             event.ignore()
             return
-        target = self.itemAt(event.position().toPoint())
+
+        # Destination : le dossier visé, celui qui contient la trace visée, ou
+        # la racine si le dépôt a lieu sur « Mes traces » ou dans le vide.
+        kind = dragged.data(0, ROLE_KIND)
+        destination = folder_of(target)
+
         event.setDropAction(Qt.DropAction.MoveAction)
         event.accept()
-        self.track_dropped.emit(track_id, folder_of(target))
+        self.item_dropped.emit(kind, int(dragged.data(0, ROLE_ID)), destination)
 
 
 class TreePanel(QWidget):
@@ -96,7 +123,7 @@ class TreePanel(QWidget):
         self.tree.itemDoubleClicked.connect(self._on_double_click)
         self.tree.currentItemChanged.connect(self._on_current_changed)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
-        self.tree.track_dropped.connect(self.move_track)
+        self.tree.item_dropped.connect(self._on_item_dropped)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -134,8 +161,7 @@ class TreePanel(QWidget):
             item.setData(0, ROLE_KIND, KIND_FOLDER)
             item.setData(0, ROLE_ID, folder.id)
             item.setIcon(0, self._folder_icon)
-            # Seules les traces se déplacent par glisser-déposer.
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
             self._populate(item, folder.id)
 
         for track in self.db.list_tracks(folder_id):
@@ -338,6 +364,38 @@ class TreePanel(QWidget):
 
         self.refresh()
         self.status_message.emit("Suppression effectuée.")
+        return True
+
+    def _on_item_dropped(self, kind: str, ident: int, folder_id: int | None) -> None:
+        if kind == KIND_TRACK:
+            self.move_track(ident, folder_id)
+        elif kind == KIND_FOLDER:
+            self.move_folder(ident, folder_id)
+
+    def move_folder(self, folder_id: int, parent_id: int | None) -> bool:
+        """Déplace un dossier sous un autre parent (glisser-déposer)."""
+        folder = self.db.get_folder(folder_id)
+        if folder is None or folder.parent_id == parent_id:
+            return False
+
+        try:
+            self.db.move_folder(folder_id, parent_id)
+        except CycleError as exc:
+            QMessageBox.warning(self, "Déplacement impossible", str(exc))
+            return False
+        except DuplicateNameError as exc:
+            QMessageBox.warning(self, "Nom déjà utilisé", str(exc))
+            return False
+
+        self.refresh()
+        self.select_folder(folder_id)
+
+        destination = "Mes traces"
+        if parent_id is not None:
+            destination = self.db.get_folder(parent_id).name
+        self.status_message.emit(
+            f"Dossier « {folder.name} » déplacé vers « {destination} »."
+        )
         return True
 
     def move_track(self, track_id: int, folder_id: int | None) -> bool:

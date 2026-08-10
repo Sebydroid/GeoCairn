@@ -141,3 +141,16 @@ class MapView(QWebEngineView):
 
     def clear_draft(self) -> None:
         self.run_js("carto.clearDraft();")
+
+    # -------------------------------------------------- trace affichée (J5)
+
+    def show_track(self, points, color: str = "#1f5fbf", fit: bool = True) -> None:
+        """Affiche une trace enregistrée et cadre la carte dessus."""
+        coords = json.dumps([[p.lat, p.lon] for p in points])
+        self.run_js(
+            f"carto.showTrack({coords}, {json.dumps(color)}, "
+            f"{str(bool(fit)).lower()});"
+        )
+
+    def clear_track(self) -> None:
+        self.run_js("carto.clearTrack();")
