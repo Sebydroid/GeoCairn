@@ -7,9 +7,15 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from .config import db_path
-from .models import DEFAULT_TRACK_COLOR, Folder, Point, Track
+from .models import (
+    DEFAULT_TRACK_COLOR,
+    DEFAULT_TRACK_OPACITY,
+    Folder,
+    Point,
+    Track,
+)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -34,6 +40,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     name        TEXT    NOT NULL,
     folder_id   INTEGER REFERENCES folders(id) ON DELETE CASCADE,
     color       TEXT    NOT NULL DEFAULT '#1f5fbf',
+    opacity     REAL    NOT NULL DEFAULT 0.9,
     description TEXT    NOT NULL DEFAULT '',
     is_loop     INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -88,10 +95,40 @@ class Database:
     def _create_schema(self) -> None:
         with self.conn:
             self.conn.executescript(SCHEMA)
-            self.conn.execute(
-                "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)",
-                (str(SCHEMA_VERSION),),
-            )
+            row = self.conn.execute(
+                "SELECT value FROM meta WHERE key = 'schema_version'"
+            ).fetchone()
+            if row is None:
+                self.conn.execute(
+                    "INSERT INTO meta(key, value) VALUES ('schema_version', ?)",
+                    (str(SCHEMA_VERSION),),
+                )
+            else:
+                self._migrate(int(row["value"]))
+
+    def _migrate(self, version: int) -> None:
+        """Met à niveau une base existante sans toucher aux données.
+
+        `CREATE TABLE IF NOT EXISTS` n'ajoute pas les colonnes apparues après
+        coup : il faut les poser explicitement.
+        """
+        if version >= SCHEMA_VERSION:
+            return
+
+        if version < 2:
+            colonnes = {
+                r["name"] for r in self.conn.execute("PRAGMA table_info(tracks)")
+            }
+            if "opacity" not in colonnes:
+                self.conn.execute(
+                    "ALTER TABLE tracks ADD COLUMN opacity REAL NOT NULL "
+                    "DEFAULT 0.9"
+                )
+
+        self.conn.execute(
+            "UPDATE meta SET value = ? WHERE key = 'schema_version'",
+            (str(SCHEMA_VERSION),),
+        )
 
     @property
     def schema_version(self) -> int:
@@ -221,15 +258,16 @@ class Database:
         color: str = DEFAULT_TRACK_COLOR,
         description: str = "",
         is_loop: bool = False,
+        opacity: float = DEFAULT_TRACK_OPACITY,
     ) -> int:
         name = name.strip() or "Trace sans nom"
         if folder_id is not None and self.get_folder(folder_id) is None:
             raise NotFoundError(f"Dossier {folder_id} introuvable.")
         with self.conn:
             cur = self.conn.execute(
-                "INSERT INTO tracks(name, folder_id, color, description, is_loop)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (name, folder_id, color, description, int(is_loop)),
+                "INSERT INTO tracks(name, folder_id, color, opacity, description,"
+                " is_loop) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, folder_id, color, opacity, description, int(is_loop)),
             )
             track_id = int(cur.lastrowid)
             if points:
@@ -249,6 +287,7 @@ class Database:
             name=row["name"],
             folder_id=row["folder_id"],
             color=row["color"],
+            opacity=row["opacity"],
             description=row["description"],
             is_loop=bool(row["is_loop"]),
             point_count=row["point_count"],
@@ -270,6 +309,7 @@ class Database:
                 name=r["name"],
                 folder_id=r["folder_id"],
                 color=r["color"],
+                opacity=r["opacity"],
                 description=r["description"],
                 is_loop=bool(r["is_loop"]),
                 point_count=r["point_count"],
@@ -287,6 +327,28 @@ class Database:
                 " WHERE id = ?",
                 (name, track_id),
             )
+
+    def set_track_style(
+        self,
+        track_id: int,
+        color: str | None = None,
+        opacity: float | None = None,
+    ) -> None:
+        """Change la couleur et/ou la transparence d'une trace."""
+        if self.get_track(track_id) is None:
+            raise NotFoundError(f"Trace {track_id} introuvable.")
+        if opacity is not None:
+            opacity = max(0.05, min(1.0, float(opacity)))
+        with self.conn:
+            if color is not None:
+                self.conn.execute(
+                    "UPDATE tracks SET color = ? WHERE id = ?", (color, track_id)
+                )
+            if opacity is not None:
+                self.conn.execute(
+                    "UPDATE tracks SET opacity = ? WHERE id = ?", (opacity, track_id)
+                )
+            self._touch(track_id)
 
     def move_track(self, track_id: int, folder_id: int | None) -> None:
         if folder_id is not None and self.get_folder(folder_id) is None:
@@ -314,6 +376,7 @@ class Database:
             folder_id=track.folder_id,
             points=track.points,
             color=track.color,
+            opacity=track.opacity,
             description=track.description,
             is_loop=track.is_loop,
         )
@@ -343,6 +406,7 @@ class Database:
             folder_id=track.folder_id,
             points=seconde,
             color=track.color,
+            opacity=track.opacity,
             description=track.description,
         )
         self.replace_points(track_id, premiere)
@@ -378,6 +442,7 @@ class Database:
             folder_id=first.folder_id,
             points=first.points + second.points,
             color=first.color,
+            opacity=first.opacity,
         )
         if not keep_sources:
             self.delete_track(first_id)

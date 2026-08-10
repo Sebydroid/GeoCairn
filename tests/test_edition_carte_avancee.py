@@ -53,8 +53,8 @@ def etat_vierge(window, monkeypatch):
     window.draft.reset()
     window.set_edit_mode(False)
     window.map_view.clear_draft()
-    window.map_view.clear_track()
-    window.displayed_track_id = None
+    window.map_view.clear_tracks()
+    window.visible_tracks.clear()
     window.tree_panel.refresh()
     window._update_draft_actions()
     yield
@@ -473,9 +473,9 @@ def test_la_trace_fusionnee_est_affichee(window):
 
     fusion = window.merge_track(a, b)
 
-    assert window.displayed_track_id == fusion
+    assert window.visible_tracks == {fusion}
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.shownCount()") == 4,
+        lambda: run_js_sync(window.map_view, f"carto.shownCount({fusion})") == 4,
         timeout_ms=5000,
     )
 

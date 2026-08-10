@@ -10,6 +10,7 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 from ..config import resource_path
+from ..models import DEFAULT_TRACK_COLOR, DEFAULT_TRACK_OPACITY
 
 #: Couches disponibles, dans l'ordre du sélecteur (identiques à map.html).
 LAYER_NAMES = [
@@ -171,15 +172,40 @@ class MapView(QWebEngineView):
         """Met un point en évidence (−1 ou None pour n'en sélectionner aucun)."""
         self.run_js(f"carto.selectPoint({-1 if index is None else int(index)});")
 
-    # -------------------------------------------------- trace affichée (J5)
+    # ------------------------------------------------ traces affichées (J5)
 
-    def show_track(self, points, color: str = "#1f5fbf", fit: bool = True) -> None:
-        """Affiche une trace enregistrée et cadre la carte dessus."""
+    def show_track(
+        self,
+        track_id: int,
+        points,
+        color: str = DEFAULT_TRACK_COLOR,
+        opacity: float = DEFAULT_TRACK_OPACITY,
+        fit: bool = False,
+        name: str = "",
+    ) -> None:
+        """Affiche une trace enregistrée, sans masquer les autres."""
         coords = json.dumps([[p.lat, p.lon] for p in points])
         self.run_js(
-            f"carto.showTrack({coords}, {json.dumps(color)}, "
-            f"{str(bool(fit)).lower()});"
+            f"carto.showTrack({int(track_id)}, {coords}, {json.dumps(color)},"
+            f" {float(opacity)!r}, {str(bool(fit)).lower()},"
+            f" {json.dumps(name)});"
         )
 
-    def clear_track(self) -> None:
-        self.run_js("carto.clearTrack();")
+    def hide_track(self, track_id: int) -> None:
+        self.run_js(f"carto.hideTrack({int(track_id)});")
+
+    def clear_tracks(self) -> None:
+        self.run_js("carto.clearTracks();")
+
+    def set_track_style(
+        self, track_id: int, color: str, opacity: float
+    ) -> None:
+        self.run_js(
+            f"carto.setTrackStyle({int(track_id)}, {json.dumps(color)},"
+            f" {float(opacity)!r});"
+        )
+
+    def zoom_tracks(self, track_ids) -> None:
+        """Cadre la carte sur une ou plusieurs traces affichées."""
+        ids = json.dumps([int(i) for i in track_ids])
+        self.run_js(f"carto.zoomTracks({ids});")

@@ -7,7 +7,6 @@ from pathlib import Path
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QInputDialog,
     QLabel,
@@ -30,9 +29,9 @@ from ..gpx import (
     safe_filename,
     write_gpx,
 )
-from .map_view import LAYER_NAMES, MapView
+from .map_view import MapView
 from .points_panel import PointsPanel
-from .tree_panel import KIND_TRACK, TreePanel
+from .tree_panel import KIND_ROOT, KIND_TRACK, TreePanel, track_ids_under
 
 
 class MainWindow(QMainWindow):
@@ -47,10 +46,11 @@ class MainWindow(QMainWindow):
 
         #: Trace en cours de saisie, conservée en mémoire (Jalon 3).
         self.draft = DraftTrack()
-        #: Trace enregistrée actuellement affichée sur la carte (Jalon 5).
-        self.displayed_track_id: int | None = None
+        #: Traces enregistrées actuellement affichées sur la carte.
+        #: État de session : il n'est pas conservé d'un lancement à l'autre.
+        self.visible_tracks: set[int] = set()
 
-        self.tree_panel = TreePanel(self.db, self)
+        self.tree_panel = TreePanel(self.db, self.visible_tracks, self)
         self.points_panel = PointsPanel(self)
         self.map_view = MapView(self)
 
@@ -90,6 +90,14 @@ class MainWindow(QMainWindow):
         self.tree_panel.resume_requested.connect(self.resume_track)
         self.tree_panel.duplicate_requested.connect(self.duplicate_track)
         self.tree_panel.merge_requested.connect(self.merge_track)
+
+        self.tree_panel.visibility_toggled.connect(self.toggle_visibility)
+        self.tree_panel.show_requested.connect(self.show_items)
+        self.tree_panel.show_only_requested.connect(self.show_only)
+        self.tree_panel.hide_requested.connect(self.hide_items)
+        self.tree_panel.zoom_requested.connect(self.zoom_to_items)
+        self.tree_panel.style_changed.connect(self.refresh_track_style)
+        self.tree_panel.tracks_removed.connect(self.forget_tracks)
 
         self.points_panel.point_selected.connect(self.map_view.select_draft_point)
         self.points_panel.delete_requested.connect(self.remove_draft_points)
@@ -176,6 +184,15 @@ class MainWindow(QMainWindow):
         )
         self.action_import.triggered.connect(lambda: self.import_gpx())
 
+        self.action_export = QAction("Exporter en GPX", self)
+        self.action_export.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
+        )
+        self.action_export.setToolTip(
+            "Exporter la trace sélectionnée dans un fichier GPX"
+        )
+        self.action_export.triggered.connect(self._export_selected_track)
+
         self.action_new_folder = QAction("Nouveau dossier", self)
         self.action_new_folder.setIcon(
             style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder)
@@ -195,32 +212,25 @@ class MainWindow(QMainWindow):
         )
         self.addToolBar(toolbar)
 
+        # Import et export en tête ; le choix du fond de carte et la création
+        # de dossier ont été retirés d'ici : ils existent déjà, l'un dans le
+        # sélecteur de couches de la carte, l'autre au clic droit.
+        toolbar.addAction(self.action_import)
+        toolbar.addAction(self.action_export)
+        toolbar.addSeparator()
         toolbar.addAction(self.action_create)
         toolbar.addAction(self.action_resume)
         toolbar.addAction(self.action_undo)
         toolbar.addAction(self.action_close_loop)
         toolbar.addAction(self.action_save)
         toolbar.addAction(self.action_clear)
-        toolbar.addSeparator()
-        toolbar.addAction(self.action_import)
-        toolbar.addAction(self.action_new_folder)
-        toolbar.addSeparator()
-
-        toolbar.addWidget(QLabel("  Fond de carte : "))
-        self.layer_combo = QComboBox(self)
-        self.layer_combo.addItems(LAYER_NAMES)
-        self.layer_combo.setMinimumWidth(190)
-        self.layer_combo.currentTextChanged.connect(self.map_view.set_base_layer)
-        toolbar.addWidget(self.layer_combo)
 
     def _build_menu(self) -> None:
         menu = self.menuBar()
 
         file_menu = menu.addMenu("&Fichier")
         file_menu.addAction(self.action_import)
-        export_action = QAction("&Exporter la trace sélectionnée en GPX…", self)
-        export_action.triggered.connect(self._export_selected_track)
-        file_menu.addAction(export_action)
+        file_menu.addAction(self.action_export)
         file_menu.addSeparator()
         quit_action = QAction("&Quitter", self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -340,8 +350,9 @@ class MainWindow(QMainWindow):
 
         self.draft.load_track(track)
         self._show_draft_on_map(fit=True)
-        self.map_view.clear_track()
-        self.displayed_track_id = None
+        # La trace passe en édition (rouge) : la garder aussi en affichage
+        # simple (bleu) superposerait deux tracés identiques.
+        self.hide_track(track_id)
         self.set_edit_mode(True)
         self._update_draft_actions()
         self.status_label.setText(
@@ -663,19 +674,121 @@ class MainWindow(QMainWindow):
         return created
 
     def display_track(self, track_id: int) -> bool:
-        """Affiche une trace enregistrée et cadre la carte dessus."""
+        """Affiche une trace et cadre la carte dessus (double-clic, import)."""
+        if not self.show_track(track_id):
+            return False
+        self.map_view.zoom_tracks([track_id])
+        return True
+
+    def show_track(self, track_id: int) -> bool:
+        """Ajoute une trace à la carte, sans masquer celles déjà affichées."""
         track = self.db.get_track(track_id, with_points=True)
         if track is None or not track.points:
             self.status_label.setText("Cette trace ne contient aucun point.")
             return False
 
-        self.map_view.show_track(track.points, track.color)
-        self.displayed_track_id = track_id
+        self.map_view.show_track(
+            track_id, track.points, track.color, track.opacity, name=track.name
+        )
+        self.visible_tracks.add(track_id)
+        self.tree_panel.refresh_bulbs()
+
         longueur = format_length(total_length(track.points))
         self.status_label.setText(
             f"« {track.name} » — {track.point_count} points, {longueur}"
+            f"  ({len(self.visible_tracks)} trace(s) affichée(s))"
         )
         return True
+
+    def hide_track(self, track_id: int) -> bool:
+        """Retire une trace de la carte."""
+        if track_id not in self.visible_tracks:
+            return False
+        self.map_view.hide_track(track_id)
+        self.visible_tracks.discard(track_id)
+        self.tree_panel.refresh_bulbs()
+        return True
+
+    def forget_tracks(self, track_ids: list) -> None:
+        """Retire de la carte des traces qui viennent d'être supprimées."""
+        for track_id in track_ids:
+            self.map_view.hide_track(int(track_id))
+            self.visible_tracks.discard(int(track_id))
+        self.tree_panel.refresh_bulbs()
+
+    def refresh_track_style(self, track_id: int) -> None:
+        """Applique sur la carte la couleur et la transparence enregistrées."""
+        track = self.db.get_track(track_id)
+        if track is None:
+            return
+        self.map_view.set_track_style(track_id, track.color, track.opacity)
+
+    # ----------------------------------- affichage de plusieurs traces
+
+    def tracks_of(self, kind: str, ident: int | None) -> list[int]:
+        """Traces concernées par une action visant un item de l'arborescence."""
+        if kind == KIND_TRACK and ident is not None:
+            return [int(ident)]
+        item = (
+            self.tree_panel.tree.topLevelItem(0)
+            if kind == KIND_ROOT
+            else self.tree_panel.find_item(kind, ident)
+        )
+        return track_ids_under(item) if item is not None else []
+
+    def show_items(self, kind: str, ident: int | None) -> int:
+        """Affiche une trace, ou toutes celles d'un dossier."""
+        affichees = [t for t in self.tracks_of(kind, ident) if self.show_track(t)]
+        if affichees:
+            self.status_label.setText(
+                f"{len(self.visible_tracks)} trace(s) affichée(s)."
+            )
+        return len(affichees)
+
+    def hide_items(self, kind: str, ident: int | None) -> int:
+        """Masque une trace, ou toutes celles d'un dossier."""
+        masquees = [t for t in self.tracks_of(kind, ident) if self.hide_track(t)]
+        if masquees:
+            pluriel = "s" if len(masquees) > 1 else ""
+            self.status_label.setText(
+                f"{len(masquees)} trace{pluriel} masquée{pluriel} — "
+                f"{len(self.visible_tracks)} encore affichée(s)."
+            )
+        return len(masquees)
+
+    def show_only(self, kind: str, ident: int | None) -> int:
+        """N'affiche que la trace ou le dossier visé."""
+        cibles = self.tracks_of(kind, ident)
+        for track_id in list(self.visible_tracks):
+            if track_id not in cibles:
+                self.hide_track(track_id)
+        return self.show_items(kind, ident)
+
+    def zoom_to_items(self, kind: str, ident: int | None) -> bool:
+        """Cadre la carte sur une trace ou sur tout un dossier.
+
+        Les traces visées sont affichées au besoin : zoomer sur une trace
+        masquée n'aurait rien montré.
+        """
+        cibles = self.tracks_of(kind, ident)
+        if not cibles:
+            self.status_label.setText("Aucune trace à afficher ici.")
+            return False
+        for track_id in cibles:
+            if track_id not in self.visible_tracks:
+                self.show_track(track_id)
+        self.map_view.zoom_tracks(cibles)
+        return True
+
+    def toggle_visibility(self, kind: str, ident: int | None) -> None:
+        """Clic sur l'ampoule : bascule l'affichage de l'élément."""
+        cibles = self.tracks_of(kind, ident)
+        if not cibles:
+            return
+        if all(t in self.visible_tracks for t in cibles):
+            self.hide_items(kind, ident)
+        else:
+            self.show_items(kind, ident)
 
     # ---------------------------------------------------- export GPX (J4)
 
@@ -739,8 +852,8 @@ class MainWindow(QMainWindow):
             # Recadrer aussi : les appels émis avant le chargement de la page
             # sont perdus, y compris le cadrage initial de la reprise.
             self._show_draft_on_map(fit=True)
-        if self.displayed_track_id is not None:
-            self.display_track(self.displayed_track_id)
+        for track_id in sorted(self.visible_tracks):
+            self.show_track(track_id)
 
     def _on_view_changed(self, lat: float, lon: float, zoom: int) -> None:
         self.coord_label.setText(f"Centre : {lat:.5f} ; {lon:.5f}  —  zoom {zoom}")
@@ -752,11 +865,8 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"Point cliqué : {lat:.5f} ; {lon:.5f}")
 
     def _on_layer_changed_from_map(self, name: str) -> None:
-        """Garde le sélecteur de la barre d'outils synchronisé avec la carte."""
-        if name != self.layer_combo.currentText():
-            self.layer_combo.blockSignals(True)
-            self.layer_combo.setCurrentText(name)
-            self.layer_combo.blockSignals(False)
+        """Le fond de carte se choisit dans le sélecteur de la carte."""
+        self.status_label.setText(f"Fond de carte : {name}")
 
     def _show_about(self) -> None:
         QMessageBox.about(

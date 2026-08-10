@@ -11,7 +11,7 @@ from carto.app import create_app
 from carto.gpx import write_gpx
 from carto.models import DEFAULT_TRACK_COLOR, Point
 from carto.ui.main_window import MainWindow
-from carto.ui.tree_panel import KIND_TRACK
+from carto.ui.tree_panel import COL_NAME, KIND_TRACK
 from tests.test_ui import run_js_sync, wait_for
 
 EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
@@ -44,8 +44,8 @@ def base_vierge(window):
         window.db.delete_track(track.id)
     for folder in window.db.list_folders(None):
         window.db.delete_folder(folder.id)
-    window.displayed_track_id = None
-    window.map_view.clear_track()
+    window.visible_tracks.clear()
+    window.map_view.clear_tracks()
     window.tree_panel.refresh()
     yield
 
@@ -91,7 +91,7 @@ def test_trace_importee_apparait_dans_l_arborescence(window, tmp_path):
     created = window.import_gpx([chemin])
 
     root = window.tree_panel.tree.topLevelItem(0)
-    labels = [root.child(i).text(0) for i in range(root.childCount())]
+    labels = [root.child(i).text(COL_NAME) for i in range(root.childCount())]
     assert labels == ["Boucle  (3 pts)"]
     assert window.tree_panel.current_selection() == (KIND_TRACK, created[0])
 
@@ -163,19 +163,21 @@ def test_import_des_parcours_reels(window):
 # --------------------------------------------------------------- affichage
 
 
+def js_shown(window, track_id) -> int:
+    return run_js_sync(window.map_view, f"carto.shownCount({track_id})")
+
+
 def test_double_clic_affiche_la_trace_sur_la_carte(window, tmp_path):
     created = window.import_gpx([fichier_gpx(tmp_path, "Trace", TROIS_POINTS)])
-    window.map_view.clear_track()
+    window.map_view.clear_tracks()
 
     assert window.display_track(created[0]) is True
 
-    assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.shownCount()") == 3,
-        timeout_ms=5000,
-    )
+    assert wait_for(lambda: js_shown(window, created[0]) == 3, timeout_ms=5000)
     coords = run_js_sync(
         window.map_view,
-        "shown.line.getLatLngs().map(function(p){return [p.lat, p.lng];})",
+        f"shownTracks[{created[0]}].line.getLatLngs()"
+        ".map(function(p){return [p.lat, p.lng];})",
     )
     assert coords == [[48.930, 1.440], [48.931, 1.442], [48.932, 1.441]]
 
@@ -185,7 +187,9 @@ def test_reperes_de_depart_et_d_arrivee(window, tmp_path):
     window.display_track(created[0])
 
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "shown.ends.getLayers().length") == 2,
+        lambda: run_js_sync(
+            window.map_view, f"shownTracks[{created[0]}].ends.getLayers().length"
+        ) == 2,
         timeout_ms=5000,
     )
 
@@ -208,31 +212,30 @@ def test_la_carte_se_recadre_sur_la_trace(window, tmp_path):
 
 def test_double_clic_dans_l_arborescence_declenche_l_affichage(window, tmp_path):
     created = window.import_gpx([fichier_gpx(tmp_path, "Trace", TROIS_POINTS)])
-    window.displayed_track_id = None
+    window.visible_tracks.clear()
+    window.map_view.clear_tracks()
 
     item = window.tree_panel.find_item(KIND_TRACK, created[0])
     window.tree_panel._on_double_click(item, 0)
 
-    assert window.displayed_track_id == created[0]
+    assert window.visible_tracks == {created[0]}
 
 
-def test_affichage_d_une_autre_trace_remplace_la_precedente(window, tmp_path):
+def test_deux_traces_restent_affichees_ensemble(window, tmp_path):
+    """L'affichage d'une trace ne doit plus chasser la précédente."""
     a = window.import_gpx([fichier_gpx(tmp_path, "Courte", TROIS_POINTS)])[0]
     b = window.import_gpx(
         [fichier_gpx(tmp_path, "Longue", TROIS_POINTS + [Point(48.933, 1.445)])]
     )[0]
+    window.map_view.clear_tracks()
+    window.visible_tracks.clear()
 
     window.display_track(a)
-    assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.shownCount()") == 3,
-        timeout_ms=5000,
-    )
-
     window.display_track(b)
-    assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.shownCount()") == 4,
-        timeout_ms=5000,
-    )
+
+    assert wait_for(lambda: js_shown(window, a) == 3, timeout_ms=5000)
+    assert wait_for(lambda: js_shown(window, b) == 4, timeout_ms=5000)
+    assert window.visible_tracks == {a, b}
 
 
 def test_longueur_affichee_dans_la_barre_d_etat(window, tmp_path):
@@ -268,10 +271,12 @@ def test_la_trace_affichee_et_le_brouillon_coexistent(window, tmp_path):
         lambda: run_js_sync(window.map_view, "carto.draftCount()") == 2,
         timeout_ms=5000,
     )
-    assert run_js_sync(window.map_view, "carto.shownCount()") == 3
+    assert js_shown(window, created[0]) == 3
 
     # Les deux tracés doivent rester distinguables à l'œil.
-    couleur_trace = run_js_sync(window.map_view, "shown.line.options.color")
+    couleur_trace = run_js_sync(
+        window.map_view, f"shownTracks[{created[0]}].line.options.color"
+    )
     couleur_brouillon = run_js_sync(window.map_view, "draft.line.options.color")
     assert couleur_trace == DEFAULT_TRACK_COLOR
     assert couleur_trace != couleur_brouillon

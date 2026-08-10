@@ -13,6 +13,7 @@ from carto.app import create_app
 from carto.gpx import GPX_NS
 from carto.ui.main_window import MainWindow
 from carto.ui.tree_panel import (
+    COL_NAME,
     KIND_FOLDER,
     KIND_TRACK,
     ROLE_ID,
@@ -66,7 +67,7 @@ def silence_dialogs(monkeypatch):
 
 def item_labels(panel: TreePanel, item=None) -> list[str]:
     parent = item if item is not None else panel.tree.topLevelItem(0)
-    return [parent.child(i).text(0) for i in range(parent.childCount())]
+    return [parent.child(i).text(COL_NAME) for i in range(parent.childCount())]
 
 
 # ------------------------------------------------------ dossiers : création

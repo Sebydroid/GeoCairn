@@ -37,6 +37,7 @@ pytest tests/
 | `carto/ui/main_window.py` | Fenêtre principale (arborescence + carte) |
 | `carto/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
 | `carto/ui/points_panel.py` | Liste des points de la trace en cours d'édition |
+| `carto/ui/icons.py` | Ampoules d'affichage, dessinées à la volée |
 | `carto/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
 | `carto/resources/map.html` | Carte : couches, évènements, pont JS ↔ Python |
 | `carto/resources/leaflet/` | Leaflet 1.9.4 embarqué (fonctionnement hors ligne) |
@@ -44,7 +45,8 @@ pytest tests/
 ## Sécurité des données
 
 La base SQLite est stockée hors du répertoire d'installation, dans
-`C:\Users\[Nom]\AppData\Local\Carto\carto.db`. Une mise à jour du logiciel
+`C:\Users\[Nom]\AppData\Local\Carto\carto.db`. Elle est mise à niveau
+automatiquement quand le schéma évolue, sans perte de données. Une mise à jour du logiciel
 (remplacement de l'exécutable) ne peut donc pas effacer les traces.
 La variable d'environnement `CARTO_DATA_DIR` permet de surcharger cet
 emplacement (utilisée par les tests).
@@ -82,6 +84,9 @@ emplacement (utilisée par les tests).
   Reprise d'une trace pour la prolonger, fermeture en boucle, déplacement d'un
   point à la souris, suppression d'un point ou d'une sélection, découpage en
   deux, fusion de deux traces, duplication.
+- **Interface** : affichage simultané de plusieurs traces, ampoules d'affichage
+  dans l'arborescence, couleur et transparence par trace, barre d'outils
+  allégée de ses doublons.
 - Jalon 7 : à venir (packaging `.exe`).
 
 ## Utilisation
@@ -107,12 +112,27 @@ emplacement (utilisée par les tests).
   dès le survol.
 - Supprimer un dossier supprime aussi son contenu, après confirmation.
 
-### Consulter une trace
+### Afficher les traces
 
-Double-cliquer sur une trace l'affiche en bleu et cadre la carte dessus, avec un
-repère vert au départ et rouge à l'arrivée. La barre d'état indique le nombre de
-points et la distance. Le brouillon en cours de saisie (rouge) reste visible :
-les deux couleurs permettent de ne pas les confondre.
+Plusieurs traces peuvent être affichées en même temps, chacune avec sa couleur.
+
+- L'**ampoule** à gauche de chaque ligne allume ou éteint l'affichage. Sur un
+  dossier, elle agit sur toutes les traces qu'il contient, sous-dossiers
+  compris ; elle est à demi allumée quand une partie seulement est visible.
+- Le **clic droit** propose *Afficher*, *Afficher seulement ceci*, *Masquer* et
+  *Zoom sur la trace* (ou sur le dossier, qui cadre alors l'ensemble). Zoomer
+  affiche la trace si elle était masquée.
+- **Double-cliquer** sur une trace l'affiche et cadre la carte dessus.
+- Le menu **Couleur** (clic droit sur une trace) propose huit teintes, et
+  *Couleur et transparence…* ouvre le sélecteur complet, canal alpha compris.
+  La couleur choisie teinte aussi le nom dans l'arborescence.
+
+Chaque trace porte un repère vert au départ et rouge à l'arrivée, et son nom
+apparaît en infobulle au survol. Le brouillon en cours de saisie reste en rouge
+vif, distinct des traces enregistrées.
+
+L'affichage est un état de session : au prochain lancement, aucune trace n'est
+affichée. Couleur et transparence, elles, sont enregistrées avec la trace.
 
 ### Modifier une trace existante
 

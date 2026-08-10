@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from carto.database import Database, DuplicateNameError, NotFoundError
-from carto.models import Point
+from carto.database import (
+    SCHEMA_VERSION,
+    Database,
+    DuplicateNameError,
+    NotFoundError,
+)
+from carto.models import DEFAULT_TRACK_OPACITY, Point
 
 # --------------------------------------------------------------------- schéma
 
@@ -16,7 +21,7 @@ def test_schema_cree_et_versionne(db):
         for row in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
     assert {"folders", "tracks", "points", "meta"} <= tables
-    assert db.schema_version == 1
+    assert db.schema_version == SCHEMA_VERSION
 
 
 def test_base_persistante_entre_deux_ouvertures(db, sample_points):
@@ -29,6 +34,143 @@ def test_base_persistante_entre_deux_ouvertures(db, sample_points):
         assert track is not None
         assert track.name == "Rallye"
         assert len(track.points) == len(sample_points)
+
+
+# ------------------------------------------------------------------ migration
+
+SCHEMA_V1 = """
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    parent_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX idx_folders_unique ON folders(IFNULL(parent_id, -1), name);
+CREATE TABLE tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    folder_id INTEGER REFERENCES folders(id) ON DELETE CASCADE,
+    color TEXT NOT NULL DEFAULT '#1f5fbf',
+    description TEXT NOT NULL DEFAULT '',
+    is_loop INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE points (
+    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL,
+    ele REAL, time TEXT, PRIMARY KEY (track_id, seq)
+) WITHOUT ROWID;
+INSERT INTO meta(key, value) VALUES ('schema_version', '1');
+"""
+
+
+def creer_base_v1(path):
+    """Reconstitue une base telle que la créait la version précédente."""
+    import sqlite3
+
+    conn = sqlite3.connect(str(path))
+    conn.executescript(SCHEMA_V1)
+    conn.execute("INSERT INTO folders(id, name) VALUES (1, 'Rallye 2016')")
+    conn.execute(
+        "INSERT INTO tracks(id, name, folder_id, color) "
+        "VALUES (1, 'Ancienne trace', 1, '#e6194b')"
+    )
+    conn.executemany(
+        "INSERT INTO points(track_id, seq, lat, lon) VALUES (1, ?, ?, ?)",
+        [(0, 48.93, 1.44), (1, 48.94, 1.45)],
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_migration_depuis_le_schema_precedent(tmp_path):
+    """Une base existante doit être mise à niveau sans perdre de données."""
+    chemin = tmp_path / "ancienne.db"
+    creer_base_v1(chemin)
+
+    with Database(chemin) as db:
+        assert db.schema_version == SCHEMA_VERSION
+
+        folder = db.get_folder(1)
+        assert folder is not None and folder.name == "Rallye 2016"
+
+        track = db.get_track(1, with_points=True)
+        assert track.name == "Ancienne trace"
+        assert track.color == "#e6194b"  # la couleur choisie est conservée
+        assert len(track.points) == 2
+        # La colonne apparue depuis prend sa valeur par défaut.
+        assert track.opacity == pytest.approx(DEFAULT_TRACK_OPACITY)
+
+
+def test_migration_idempotente(tmp_path):
+    chemin = tmp_path / "ancienne.db"
+    creer_base_v1(chemin)
+
+    for _ in range(3):
+        with Database(chemin) as db:
+            assert db.schema_version == SCHEMA_VERSION
+            assert db.get_track(1).name == "Ancienne trace"
+
+    with Database(chemin) as db:
+        colonnes = [r["name"] for r in db.conn.execute("PRAGMA table_info(tracks)")]
+        assert colonnes.count("opacity") == 1
+
+
+# --------------------------------------------------------- couleur et opacité
+
+
+def test_style_par_defaut(db, sample_points):
+    track_id = db.create_track("Trace", points=sample_points)
+    track = db.get_track(track_id)
+
+    assert track.color == "#1f5fbf"
+    assert track.opacity == pytest.approx(DEFAULT_TRACK_OPACITY)
+
+
+def test_changement_de_couleur(db, sample_points):
+    track_id = db.create_track("Trace", points=sample_points)
+
+    db.set_track_style(track_id, color="#ff8800")
+
+    assert db.get_track(track_id).color == "#ff8800"
+    assert db.get_track(track_id).opacity == pytest.approx(DEFAULT_TRACK_OPACITY)
+
+
+def test_changement_de_transparence(db, sample_points):
+    track_id = db.create_track("Trace", points=sample_points)
+
+    db.set_track_style(track_id, opacity=0.4)
+
+    assert db.get_track(track_id).opacity == pytest.approx(0.4)
+    assert db.get_track(track_id).color == "#1f5fbf"  # inchangée
+
+
+def test_transparence_bornee(db, sample_points):
+    """Une trace totalement transparente serait introuvable sur la carte."""
+    track_id = db.create_track("Trace", points=sample_points)
+
+    db.set_track_style(track_id, opacity=0.0)
+    assert db.get_track(track_id).opacity == pytest.approx(0.05)
+
+    db.set_track_style(track_id, opacity=5.0)
+    assert db.get_track(track_id).opacity == pytest.approx(1.0)
+
+
+def test_style_d_une_trace_inexistante(db):
+    with pytest.raises(NotFoundError):
+        db.set_track_style(999, color="#000000")
+
+
+def test_le_style_suit_la_duplication(db, sample_points):
+    track_id = db.create_track("Trace", points=sample_points)
+    db.set_track_style(track_id, color="#ff8800", opacity=0.35)
+
+    copie = db.duplicate_track(track_id)
+
+    assert db.get_track(copie).color == "#ff8800"
+    assert db.get_track(copie).opacity == pytest.approx(0.35)
 
 
 # ------------------------------------------------------------------- dossiers

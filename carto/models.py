@@ -9,6 +9,9 @@ from dataclasses import dataclass, field
 #: saisie (rouge) : les deux peuvent être affichés en même temps.
 DEFAULT_TRACK_COLOR = "#1f5fbf"
 
+#: Opacité par défaut du tracé sur la carte (1.0 = opaque).
+DEFAULT_TRACK_OPACITY = 0.9
+
 
 @dataclass(frozen=True)
 class Point:
@@ -40,6 +43,7 @@ class Track:
     name: str
     folder_id: int | None = None
     color: str = DEFAULT_TRACK_COLOR
+    opacity: float = DEFAULT_TRACK_OPACITY
     description: str = ""
     is_loop: bool = False
     point_count: int = 0

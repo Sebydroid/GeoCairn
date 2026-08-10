@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QColorDialog,
+    QHeaderView,
     QInputDialog,
     QMenu,
     QMessageBox,
@@ -16,8 +19,13 @@ from PyQt6.QtWidgets import (
 )
 
 from ..database import CycleError, Database, DuplicateNameError
+from .icons import BULB_OFF, BULB_ON, BULB_PARTIAL, bulb_icon
 
-#: Rôles de données portés par les items de l'arbre.
+#: Colonnes de l'arbre : l'ampoule d'affichage, puis le nom.
+COL_BULB = 0
+COL_NAME = 1
+
+#: Rôles de données portés par les items de l'arbre (colonne 0).
 ROLE_KIND = Qt.ItemDataRole.UserRole
 ROLE_ID = Qt.ItemDataRole.UserRole + 1
 
@@ -25,12 +33,25 @@ KIND_ROOT = "root"
 KIND_FOLDER = "folder"
 KIND_TRACK = "track"
 
+#: Couleurs proposées au clic droit, choisies pour rester distinctes entre
+#: elles et lisibles sur un fond de carte.
+COULEURS = [
+    ("Bleu", "#1f5fbf"),
+    ("Rouge", "#e6194b"),
+    ("Vert", "#2e8b39"),
+    ("Orange", "#f08c00"),
+    ("Violet", "#8b2fc9"),
+    ("Turquoise", "#0f9b8e"),
+    ("Rose", "#e050a0"),
+    ("Noir", "#202020"),
+]
+
 
 def folder_of(item: QTreeWidgetItem | None) -> int | None:
     """Dossier auquel appartient un item : le premier dossier en remontant."""
     while item is not None:
-        if item.data(0, ROLE_KIND) == KIND_FOLDER:
-            return item.data(0, ROLE_ID)
+        if item.data(COL_BULB, ROLE_KIND) == KIND_FOLDER:
+            return item.data(COL_BULB, ROLE_ID)
         item = item.parent()
     return None
 
@@ -43,6 +64,18 @@ def is_self_or_descendant(candidate: QTreeWidgetItem | None,
             return True
         candidate = candidate.parent()
     return False
+
+
+def track_ids_under(item: QTreeWidgetItem) -> list[int]:
+    """Identifiants de toutes les traces contenues dans un item, en profondeur."""
+    trouvees: list[int] = []
+    pile = [item]
+    while pile:
+        courant = pile.pop()
+        if courant.data(COL_BULB, ROLE_KIND) == KIND_TRACK:
+            trouvees.append(int(courant.data(COL_BULB, ROLE_ID)))
+        pile.extend(courant.child(i) for i in range(courant.childCount()))
+    return trouvees
 
 
 class _TreeWidget(QTreeWidget):
@@ -68,14 +101,16 @@ class _TreeWidget(QTreeWidget):
 
     def _dragged_item(self) -> QTreeWidgetItem | None:
         item = self.currentItem()
-        if item is None or item.data(0, ROLE_KIND) not in (KIND_TRACK, KIND_FOLDER):
+        if item is None or item.data(COL_BULB, ROLE_KIND) not in (
+            KIND_TRACK, KIND_FOLDER
+        ):
             return None
         return item
 
     def _drop_is_allowed(self, dragged: QTreeWidgetItem | None, target) -> bool:
         if dragged is None:
             return False
-        if dragged.data(0, ROLE_KIND) != KIND_FOLDER:
+        if dragged.data(COL_BULB, ROLE_KIND) != KIND_FOLDER:
             return True
         # Déposer un dossier dans lui-même ou dans sa propre descendance
         # ferait disparaître la branche : on refuse dès le survol.
@@ -99,17 +134,15 @@ class _TreeWidget(QTreeWidget):
 
         # Destination : le dossier visé, celui qui contient la trace visée, ou
         # la racine si le dépôt a lieu sur « Mes traces » ou dans le vide.
-        kind = dragged.data(0, ROLE_KIND)
+        kind = dragged.data(COL_BULB, ROLE_KIND)
         destination = folder_of(target)
 
-        # IgnoreAction, surtout pas MoveAction : après le retour de dropEvent,
-        # QAbstractItemView.startDrag() supprime la ligne d'origine si l'action
-        # retenue est MoveAction. Comme nous avons déjà reconstruit l'arbre
-        # depuis la base, cette suppression retirerait l'élément fraîchement
-        # replacé — il ne réapparaissait qu'au rafraîchissement suivant.
+        # IgnoreAction, surtout pas MoveAction : voir la note de classe.
         event.setDropAction(Qt.DropAction.IgnoreAction)
         event.accept()
-        self.item_dropped.emit(kind, int(dragged.data(0, ROLE_ID)), destination)
+        self.item_dropped.emit(
+            kind, int(dragged.data(COL_BULB, ROLE_ID)), destination
+        )
 
 
 class TreePanel(QWidget):
@@ -123,16 +156,43 @@ class TreePanel(QWidget):
     duplicate_requested = pyqtSignal(int)
     merge_requested = pyqtSignal(int)
 
-    def __init__(self, db: Database, parent=None) -> None:
+    #: Affichage sur la carte : (kind, identifiant)
+    visibility_toggled = pyqtSignal(str, object)
+    show_requested = pyqtSignal(str, object)
+    show_only_requested = pyqtSignal(str, object)
+    hide_requested = pyqtSignal(str, object)
+    zoom_requested = pyqtSignal(str, object)
+    style_changed = pyqtSignal(int)
+    tracks_removed = pyqtSignal(list)
+
+    def __init__(
+        self,
+        db: Database,
+        visible_tracks: set[int] | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.db = db
+        #: Ensemble partagé avec la fenêtre : les traces visibles sur la carte.
+        self.visible_tracks = visible_tracks if visible_tracks is not None else set()
 
         self.tree = _TreeWidget(self)
-        self.tree.setHeaderLabel("Bibliothèque")
+        self.tree.setColumnCount(2)
+        self.tree.setHeaderLabels(["", "Bibliothèque"])
+        # L'arborescence (indentation et flèches) se dessine dans la colonne du
+        # nom : sans cela, l'indentation décalerait l'ampoule des éléments
+        # imbriqués hors de sa colonne, qui la rognerait.
+        self.tree.setTreePosition(COL_NAME)
+        self.tree.header().setSectionResizeMode(
+            COL_BULB, QHeaderView.ResizeMode.Fixed
+        )
+        self.tree.setColumnWidth(COL_BULB, 26)
+        self.tree.header().setStretchLastSection(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setUniformRowHeights(True)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.itemDoubleClicked.connect(self._on_double_click)
+        self.tree.itemClicked.connect(self._on_item_clicked)
         self.tree.currentItemChanged.connect(self._on_current_changed)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.item_dropped.connect(self._on_item_dropped)
@@ -155,34 +215,67 @@ class TreePanel(QWidget):
         selected = self.current_selection()
 
         self.tree.clear()
-        root = QTreeWidgetItem(self.tree, ["Mes traces"])
-        root.setData(0, ROLE_KIND, KIND_ROOT)
-        root.setData(0, ROLE_ID, None)
-        root.setIcon(0, self._folder_icon)
+        root = QTreeWidgetItem(self.tree, ["", "Mes traces"])
+        root.setData(COL_BULB, ROLE_KIND, KIND_ROOT)
+        root.setData(COL_BULB, ROLE_ID, None)
+        root.setIcon(COL_NAME, self._folder_icon)
         root.setFlags(root.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
 
         self._populate(root, None)
         root.setExpanded(True)
 
         self._restore_state(expanded, selected)
+        self.refresh_bulbs()
 
     def _populate(self, parent_item: QTreeWidgetItem, folder_id: int | None) -> None:
         """Ajoute récursivement sous-dossiers puis traces d'un dossier."""
         for folder in self.db.list_folders(folder_id):
-            item = QTreeWidgetItem(parent_item, [folder.name])
-            item.setData(0, ROLE_KIND, KIND_FOLDER)
-            item.setData(0, ROLE_ID, folder.id)
-            item.setIcon(0, self._folder_icon)
+            item = QTreeWidgetItem(parent_item, ["", folder.name])
+            item.setData(COL_BULB, ROLE_KIND, KIND_FOLDER)
+            item.setData(COL_BULB, ROLE_ID, folder.id)
+            item.setIcon(COL_NAME, self._folder_icon)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
             self._populate(item, folder.id)
 
         for track in self.db.list_tracks(folder_id):
             label = f"{track.name}  ({track.point_count} pts)"
-            item = QTreeWidgetItem(parent_item, [label])
-            item.setData(0, ROLE_KIND, KIND_TRACK)
-            item.setData(0, ROLE_ID, track.id)
-            item.setIcon(0, self._track_icon)
+            item = QTreeWidgetItem(parent_item, ["", label])
+            item.setData(COL_BULB, ROLE_KIND, KIND_TRACK)
+            item.setData(COL_BULB, ROLE_ID, track.id)
+            item.setIcon(COL_NAME, self._track_icon)
+            item.setForeground(COL_NAME, QColor(track.color))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
+
+    # ------------------------------------------------------------- ampoules
+
+    def refresh_bulbs(self) -> None:
+        """Met à jour les ampoules sans reconstruire l'arbre."""
+        for item in self._iter_items():
+            kind = item.data(COL_BULB, ROLE_KIND)
+            if kind == KIND_TRACK:
+                visible = int(item.data(COL_BULB, ROLE_ID)) in self.visible_tracks
+                item.setIcon(COL_BULB, bulb_icon(BULB_ON if visible else BULB_OFF))
+            else:
+                item.setIcon(COL_BULB, bulb_icon(self.folder_state(item)))
+
+    def folder_state(self, item: QTreeWidgetItem) -> str:
+        """État d'affichage d'un dossier : toutes, certaines ou aucune trace."""
+        traces = track_ids_under(item)
+        if not traces:
+            return BULB_OFF
+        visibles = sum(1 for t in traces if t in self.visible_tracks)
+        if visibles == 0:
+            return BULB_OFF
+        if visibles == len(traces):
+            return BULB_ON
+        return BULB_PARTIAL
+
+    def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        if column != COL_BULB:
+            return
+        self.visibility_toggled.emit(
+            item.data(COL_BULB, ROLE_KIND), item.data(COL_BULB, ROLE_ID)
+        )
 
     # ------------------------------------------------------------ sélection
 
@@ -191,7 +284,7 @@ class TreePanel(QWidget):
         item = self.tree.currentItem()
         if item is None:
             return (KIND_ROOT, None)
-        return (item.data(0, ROLE_KIND), item.data(0, ROLE_ID))
+        return (item.data(COL_BULB, ROLE_KIND), item.data(COL_BULB, ROLE_ID))
 
     def current_folder_id(self) -> int | None:
         """Dossier de destination pour une nouvelle création."""
@@ -199,7 +292,10 @@ class TreePanel(QWidget):
 
     def find_item(self, kind: str, ident: int | None) -> QTreeWidgetItem | None:
         for item in self._iter_items():
-            if (item.data(0, ROLE_KIND), item.data(0, ROLE_ID)) == (kind, ident):
+            if (
+                item.data(COL_BULB, ROLE_KIND),
+                item.data(COL_BULB, ROLE_ID),
+            ) == (kind, ident):
                 return item
         return None
 
@@ -232,14 +328,16 @@ class TreePanel(QWidget):
 
     def _expanded_folder_ids(self) -> set[int]:
         return {
-            item.data(0, ROLE_ID)
+            item.data(COL_BULB, ROLE_ID)
             for item in self._iter_items()
-            if item.isExpanded() and item.data(0, ROLE_KIND) == KIND_FOLDER
+            if item.isExpanded()
+            and item.data(COL_BULB, ROLE_KIND) == KIND_FOLDER
         }
 
     def _restore_state(self, expanded: set[int], selected: tuple[str, int | None]) -> None:
         for item in self._iter_items():
-            kind, ident = item.data(0, ROLE_KIND), item.data(0, ROLE_ID)
+            kind = item.data(COL_BULB, ROLE_KIND)
+            ident = item.data(COL_BULB, ROLE_ID)
             if kind == KIND_FOLDER and ident in expanded:
                 item.setExpanded(True)
             if (kind, ident) == selected:
@@ -251,12 +349,34 @@ class TreePanel(QWidget):
         item = self.tree.itemAt(position)
         if item is not None:
             self.tree.setCurrentItem(item)
-        kind, _ident = self.current_selection()
+        kind, ident = self.current_selection()
 
         # Les lambdas sont nécessaires : triggered() transmet un booléen
         # « checked » qui serait reçu comme premier argument (donc comme un nom
         # de dossier, ou comme confirm=False sur une suppression).
         menu = QMenu(self)
+
+        if kind in (KIND_FOLDER, KIND_TRACK, KIND_ROOT):
+            cible = "le dossier" if kind != KIND_TRACK else "la trace"
+            if kind == KIND_ROOT:
+                cible = "tout"
+            menu.addAction(
+                "Afficher",
+                lambda: self.show_requested.emit(kind, ident),
+            )
+            menu.addAction(
+                "Afficher seulement ceci",
+                lambda: self.show_only_requested.emit(kind, ident),
+            )
+            menu.addAction(
+                "Masquer", lambda: self.hide_requested.emit(kind, ident)
+            )
+            menu.addAction(
+                f"Zoom sur {cible}",
+                lambda: self.zoom_requested.emit(kind, ident),
+            )
+            menu.addSeparator()
+
         menu.addAction("Nouveau dossier…", lambda: self.create_folder())
 
         if kind == KIND_FOLDER:
@@ -264,6 +384,7 @@ class TreePanel(QWidget):
             menu.addAction("Renommer le dossier…", lambda: self.rename_selected())
             menu.addAction("Supprimer le dossier", lambda: self.delete_selected())
         elif kind == KIND_TRACK:
+            menu.addMenu(self._build_color_menu(int(ident), menu))
             menu.addSeparator()
             menu.addAction(
                 "Modifier la trace",
@@ -284,6 +405,28 @@ class TreePanel(QWidget):
 
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
+    def _build_color_menu(self, track_id: int, parent: QMenu) -> QMenu:
+        menu = QMenu("Couleur", parent)
+        for nom, valeur in COULEURS:
+            action = menu.addAction(nom)
+            action.setIcon(self._color_swatch(valeur))
+            action.triggered.connect(
+                lambda _checked=False, c=valeur: self.set_track_color(track_id, c)
+            )
+        menu.addSeparator()
+        menu.addAction(
+            "Couleur et transparence…",
+            lambda: self.choose_track_color(track_id),
+        )
+        return menu
+
+    def _color_swatch(self, couleur: str):
+        from PyQt6.QtGui import QIcon, QPixmap
+
+        pixmap = QPixmap(14, 14)
+        pixmap.fill(QColor(couleur))
+        return QIcon(pixmap)
+
     def _request_export(self) -> None:
         self._emit_for_track(self.export_requested)
 
@@ -292,6 +435,44 @@ class TreePanel(QWidget):
         kind, ident = self.current_selection()
         if kind == KIND_TRACK:
             signal.emit(int(ident))
+
+    # ------------------------------------------------- couleur des traces
+
+    def set_track_color(
+        self, track_id: int, color: str, opacity: float | None = None
+    ) -> bool:
+        """Applique une couleur (et éventuellement une transparence)."""
+        track = self.db.get_track(track_id)
+        if track is None:
+            return False
+        self.db.set_track_style(track_id, color=color, opacity=opacity)
+        item = self.find_item(KIND_TRACK, track_id)
+        if item is not None:
+            item.setForeground(COL_NAME, QColor(color))
+        self.style_changed.emit(track_id)
+        self.status_message.emit(f"Couleur de « {track.name} » modifiée.")
+        return True
+
+    def choose_track_color(self, track_id: int) -> bool:
+        """Ouvre le sélecteur de couleur, canal de transparence compris."""
+        track = self.db.get_track(track_id)
+        if track is None:
+            return False
+
+        initiale = QColor(track.color)
+        initiale.setAlpha(int(round(track.opacity * 255)))
+        choisie = QColorDialog.getColor(
+            initiale,
+            self,
+            f"Couleur de « {track.name} »",
+            QColorDialog.ColorDialogOption.ShowAlphaChannel,
+        )
+        if not choisie.isValid():
+            return False
+
+        return self.set_track_color(
+            track_id, choisie.name(), choisie.alphaF()
+        )
 
     # --------------------------------------------------------- opérations
 
@@ -387,9 +568,18 @@ class TreePanel(QWidget):
                 return False
 
         if kind == KIND_FOLDER:
+            item = self.find_item(KIND_FOLDER, ident)
+            disparues = track_ids_under(item) if item is not None else []
             self.db.delete_folder(ident)
         else:
+            disparues = [int(ident)]
             self.db.delete_track(ident)
+
+        # Les traces supprimées doivent aussi disparaître de la carte.
+        for track_id in disparues:
+            self.visible_tracks.discard(track_id)
+        if disparues:
+            self.tracks_removed.emit(disparues)
 
         self.refresh()
         self.status_message.emit("Suppression effectuée.")
@@ -448,13 +638,14 @@ class TreePanel(QWidget):
     # -------------------------------------------------------------- signaux
 
     def _on_double_click(self, item: QTreeWidgetItem, _column: int) -> None:
-        if item.data(0, ROLE_KIND) == KIND_TRACK:
-            self.track_activated.emit(int(item.data(0, ROLE_ID)))
+        if item.data(COL_BULB, ROLE_KIND) == KIND_TRACK:
+            self.track_activated.emit(int(item.data(COL_BULB, ROLE_ID)))
 
     def _on_current_changed(self, current, _previous) -> None:
         if current is None:
             self.selection_changed.emit(KIND_ROOT, None)
         else:
             self.selection_changed.emit(
-                current.data(0, ROLE_KIND), current.data(0, ROLE_ID)
+                current.data(COL_BULB, ROLE_KIND),
+                current.data(COL_BULB, ROLE_ID),
             )

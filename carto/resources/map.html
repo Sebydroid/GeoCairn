@@ -208,13 +208,26 @@
         }
     });
 
-    // --- Trace enregistrée affichée sur la carte ---------------------------
-    var shown = {
-        line: L.polyline([], { color: "#1f5fbf", weight: 4, opacity: 0.9 }),
-        ends: L.layerGroup()
-    };
-    shown.line.addTo(map);
-    shown.ends.addTo(map);
+    // --- Traces enregistrées affichées sur la carte ------------------------
+    // Plusieurs traces peuvent être visibles simultanément ; chacune a sa
+    // polyligne, ses repères de départ/arrivée, sa couleur et son opacité.
+    var shownTracks = {};   // identifiant -> { line, ends }
+
+    function endStyle(couleur, remplissage, opacity) {
+        return {
+            radius: 7, color: couleur, fillColor: remplissage,
+            fillOpacity: opacity, opacity: opacity, weight: 2
+        };
+    }
+
+    function boundsOf(ids) {
+        var bounds = L.latLngBounds([]);
+        (ids || []).forEach(function (id) {
+            var trace = shownTracks[id];
+            if (trace) { bounds.extend(trace.line.getBounds()); }
+        });
+        return bounds;
+    }
 
     // --- API appelée depuis Python -----------------------------------------
     window.carto = {
@@ -314,39 +327,76 @@
         draftCount: function () { return draft.latlngs.length; },
         draftPoints: function () { return draft.latlngs; },
 
-        // -- trace enregistree affichee -------------------------------------
-        showTrack: function (points, color, fit) {
+        // -- traces enregistrees affichees ----------------------------------
+        showTrack: function (id, points, color, opacity, fit, name) {
+            carto.hideTrack(id);
             var latlngs = (points || []).map(function (p) { return [p[0], p[1]]; });
-            shown.line.setLatLngs(latlngs);
-            shown.line.setStyle({ color: color || "#1f5fbf" });
-            shown.ends.clearLayers();
+            if (!latlngs.length) { return 0; }
 
-            if (latlngs.length) {
-                L.circleMarker(latlngs[0], {
-                    radius: 7, color: "#1f8a3b", fillColor: "#2ecc71",
-                    fillOpacity: 1, weight: 2
-                }).addTo(shown.ends).bindTooltip("Départ");
+            var alpha = (opacity === undefined || opacity === null) ? 0.9 : opacity;
+            var line = L.polyline(latlngs, {
+                color: color || "#1f5fbf", weight: 4, opacity: alpha
+            }).addTo(map);
+            if (name) { line.bindTooltip(name, { sticky: true }); }
 
-                var last = latlngs[latlngs.length - 1];
-                L.circleMarker(last, {
-                    radius: 7, color: "#8a1f1f", fillColor: "#e74c3c",
-                    fillOpacity: 1, weight: 2
-                }).addTo(shown.ends).bindTooltip("Arrivée");
+            var ends = L.layerGroup().addTo(map);
+            L.circleMarker(latlngs[0], endStyle("#1f8a3b", "#2ecc71", alpha))
+                .addTo(ends).bindTooltip((name ? name + " — " : "") + "Départ");
+            L.circleMarker(
+                latlngs[latlngs.length - 1], endStyle("#8a1f1f", "#e74c3c", alpha)
+            ).addTo(ends).bindTooltip((name ? name + " — " : "") + "Arrivée");
 
-                if (fit !== false) {
-                    map.fitBounds(shown.line.getBounds(), { padding: [40, 40] });
-                }
-            }
+            shownTracks[id] = { line: line, ends: ends };
+            if (fit) { map.fitBounds(line.getBounds(), { padding: [40, 40] }); }
             return latlngs.length;
         },
 
-        clearTrack: function () {
-            shown.line.setLatLngs([]);
-            shown.ends.clearLayers();
+        hideTrack: function (id) {
+            var trace = shownTracks[id];
+            if (!trace) { return false; }
+            map.removeLayer(trace.line);
+            map.removeLayer(trace.ends);
+            delete shownTracks[id];
+            return true;
+        },
+
+        clearTracks: function () {
+            Object.keys(shownTracks).forEach(function (id) {
+                map.removeLayer(shownTracks[id].line);
+                map.removeLayer(shownTracks[id].ends);
+            });
+            shownTracks = {};
             return 0;
         },
 
-        shownCount: function () { return shown.line.getLatLngs().length; }
+        setTrackStyle: function (id, color, opacity) {
+            var trace = shownTracks[id];
+            if (!trace) { return false; }
+            var alpha = (opacity === undefined || opacity === null) ? 0.9 : opacity;
+            trace.line.setStyle({ color: color, opacity: alpha });
+            trace.ends.getLayers().forEach(function (marker) {
+                marker.setStyle({ opacity: alpha, fillOpacity: alpha });
+            });
+            return true;
+        },
+
+        zoomTracks: function (ids) {
+            var bounds = boundsOf(ids);
+            if (!bounds.isValid()) { return false; }
+            map.fitBounds(bounds, { padding: [40, 40] });
+            return true;
+        },
+
+        shownTrackIds: function () {
+            return Object.keys(shownTracks).map(Number);
+        },
+
+        isTrackShown: function (id) { return !!shownTracks[id]; },
+
+        shownCount: function (id) {
+            var trace = shownTracks[id];
+            return trace ? trace.line.getLatLngs().length : 0;
+        }
     };
 
     function connectBridge() {

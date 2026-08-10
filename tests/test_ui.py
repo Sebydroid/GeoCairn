@@ -8,14 +8,21 @@ from __future__ import annotations
 
 import pytest
 from PyQt6.QtCore import QEventLoop, QTimer
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QToolBar
 
 from carto.app import create_app
 from carto.database import Database
 from carto.ui.main_window import MainWindow
 from carto.ui.map_view import LAYER_NAMES, MapView
 from carto.ui.points_panel import PointsPanel
-from carto.ui.tree_panel import KIND_FOLDER, KIND_TRACK, ROLE_ID, ROLE_KIND, TreePanel
+from carto.ui.tree_panel import (
+    COL_NAME,
+    KIND_FOLDER,
+    KIND_TRACK,
+    ROLE_ID,
+    ROLE_KIND,
+    TreePanel,
+)
 
 MAP_LOAD_TIMEOUT_MS = 20000
 
@@ -91,16 +98,29 @@ def test_fenetre_principale_deux_panneaux(qapp, db):
     window.close()
 
 
-def test_selecteur_de_couches_complet(qapp, db):
-    window = MainWindow(db=db)
-    items = [window.layer_combo.itemText(i) for i in range(window.layer_combo.count())]
+def test_barre_d_outils_sans_doublons(qapp, db):
+    """Le fond de carte et « Nouveau dossier » ne sont plus dans la barre.
 
-    assert items == LAYER_NAMES
-    assert any("OpenStreetMap" in name for name in items)
-    assert any("Satellite" in name for name in items)
-    assert any("IGN" in name for name in items)
+    Ils restent accessibles ailleurs : sélecteur de couches de la carte pour
+    l'un, clic droit dans l'arborescence pour l'autre.
+    """
+    window = MainWindow(db=db)
+    barre = window.findChildren(QToolBar)[0]
+    libelles = [a.text() for a in barre.actions() if a.text()]
+
+    assert libelles[:2] == ["Importer un GPX", "Exporter en GPX"]
+    assert "Nouveau dossier" not in libelles
+    assert not hasattr(window, "layer_combo")
 
     window.close()
+
+
+def test_le_selecteur_de_couches_reste_sur_la_carte(loaded_map):
+    """Les cinq fonds restent proposés par le contrôle Leaflet."""
+    assert run_js_sync(loaded_map, "carto.layerNames()") == LAYER_NAMES
+    assert any("OpenStreetMap" in nom for nom in LAYER_NAMES)
+    assert any("Satellite" in nom for nom in LAYER_NAMES)
+    assert any("IGN" in nom for nom in LAYER_NAMES)
 
 
 # -------------------------------------------------------------- arborescence
@@ -116,12 +136,12 @@ def test_arborescence_reflete_la_base(qapp, db, sample_points):
     root = panel.tree.topLevelItem(0)
 
     assert panel.tree.topLevelItemCount() == 1
-    labels = [root.child(i).text(0) for i in range(root.childCount())]
+    labels = [root.child(i).text(COL_NAME) for i in range(root.childCount())]
     assert labels == ["Alpes", "Trace racine  (4 pts)"]
 
     alpes = root.child(0)
-    assert alpes.child(0).text(0) == "2026"
-    assert alpes.child(0).child(0).text(0) == "Trace du col  (4 pts)"
+    assert alpes.child(0).text(COL_NAME) == "2026"
+    assert alpes.child(0).child(0).text(COL_NAME) == "Trace du col  (4 pts)"
 
 
 def test_arborescence_sans_doublons_apres_rafraichissements(qapp, db, sample_points):
@@ -133,7 +153,7 @@ def test_arborescence_sans_doublons_apres_rafraichissements(qapp, db, sample_poi
         panel.refresh()
 
     root = panel.tree.topLevelItem(0)
-    labels = [root.child(i).text(0) for i in range(root.childCount())]
+    labels = [root.child(i).text(COL_NAME) for i in range(root.childCount())]
 
     assert panel.tree.topLevelItemCount() == 1
     assert len(labels) == len(set(labels)) == 2
