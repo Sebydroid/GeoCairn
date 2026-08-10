@@ -33,6 +33,7 @@ pytest tests/
 | `carto/models.py` | Structures de données (`Folder`, `Track`, `Point`) |
 | `carto/geo.py` | Distances, longueur d'une trace, rectangle englobant |
 | `carto/editor.py` | Trace brouillon maintenue en mémoire pendant la saisie |
+| `carto/gpx.py` | Export au format GPX 1.1 |
 | `carto/ui/main_window.py` | Fenêtre principale (arborescence + carte) |
 | `carto/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
 | `carto/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
@@ -69,9 +70,15 @@ emplacement (utilisée par les tests).
   dernier point (Ctrl+Z), effacement du brouillon, longueur cumulée affichée en
   temps réel. Le brouillon est conservé en mémoire même après la sortie du mode
   saisie.
-- Jalons 4 à 7 : à venir. La sauvegarde du brouillon en base arrive au Jalon 4.
+- **Jalon 4 — Arborescence et sauvegarde locale** : fait.
+  Enregistrement du brouillon en base (`Ctrl+S`), création / renommage /
+  suppression de dossiers et sous-dossiers, glisser-déposer d'une trace vers un
+  dossier, menu contextuel au clic droit, export GPX 1.1.
+- Jalons 5 à 7 : à venir (import GPX, édition avancée, packaging `.exe`).
 
-## Utilisation : créer une trace
+## Utilisation
+
+### Créer et enregistrer une trace
 
 1. Cliquer sur **Créer une trace** dans la barre d'outils (ou `Ctrl+N`).
 2. Cliquer sur la carte pour poser les points ; ils se relient au fur et à
@@ -79,6 +86,23 @@ emplacement (utilisée par les tests).
 3. `Ctrl+Z` annule le dernier point (le raccourci fonctionne aussi lorsque la
    carte a le focus).
 4. Le nombre de points et la longueur cumulée s'affichent en bas à droite.
+5. **Enregistrer la trace** (`Ctrl+S`) la range dans le dossier sélectionné à
+   gauche. Il faut au moins deux points.
+
+### Ranger ses traces
+
+- **Nouveau dossier** crée un sous-dossier dans la sélection courante. Deux
+  dossiers de même nom ne peuvent pas coexister au même niveau.
+- Le **clic droit** ouvre un menu : renommer, supprimer, exporter en GPX.
+- Une trace se **glisse-dépose** vers un dossier. Les dossiers, eux, ne se
+  déplacent pas : le plan ne le prévoit pas à ce stade.
+- Supprimer un dossier supprime aussi son contenu, après confirmation.
+
+### Exporter
+
+Clic droit sur une trace → **Exporter en GPX…**, ou menu *Fichier*. Le fichier
+produit est du GPX 1.1 standard, relisible par les autres logiciels de
+randonnée.
 
 ## Note technique
 

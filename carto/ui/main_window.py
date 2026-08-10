@@ -6,6 +6,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QComboBox,
+    QFileDialog,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -18,8 +20,9 @@ from .. import APP_NAME, APP_VERSION
 from ..config import db_path
 from ..database import Database
 from ..editor import DraftTrack
+from ..gpx import safe_filename, write_gpx
 from .map_view import LAYER_NAMES, MapView
-from .tree_panel import TreePanel
+from .tree_panel import KIND_TRACK, TreePanel
 
 
 class MainWindow(QMainWindow):
@@ -58,6 +61,9 @@ class MainWindow(QMainWindow):
         self.map_view.layer_changed.connect(self._on_layer_changed_from_map)
         self.map_view.undo_requested.connect(self.undo_last_point)
 
+        self.tree_panel.export_requested.connect(self.export_track)
+        self.tree_panel.status_message.connect(self.status_label.setText)
+
         self._update_draft_actions()
 
     # ------------------------------------------------------------ interface
@@ -66,8 +72,10 @@ class MainWindow(QMainWindow):
         style = self.style()
 
         self.action_create = QAction("Créer une trace", self)
+        # Même icône que les traces dans l'arborescence ; le dossier est
+        # réservé à l'action « Nouveau dossier ».
         self.action_create.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder)
+            style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
         )
         self.action_create.setCheckable(True)
         self.action_create.setShortcut("Ctrl+N")
@@ -88,6 +96,19 @@ class MainWindow(QMainWindow):
         )
         self.action_undo.triggered.connect(self.undo_last_point)
 
+        self.action_save = QAction("Enregistrer la trace", self)
+        self.action_save.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
+        )
+        self.action_save.setShortcut(QKeySequence.StandardKey.Save)
+        self.action_save.setShortcutContext(
+            Qt.ShortcutContext.ApplicationShortcut
+        )
+        self.action_save.setToolTip(
+            "Enregistrer le brouillon dans le dossier sélectionné (Ctrl+S)"
+        )
+        self.action_save.triggered.connect(lambda: self.save_draft())
+
         self.action_clear = QAction("Effacer le brouillon", self)
         self.action_clear.setIcon(
             style.standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton)
@@ -96,7 +117,16 @@ class MainWindow(QMainWindow):
         # reçu comme `confirm` et sauterait la demande de confirmation.
         self.action_clear.triggered.connect(lambda: self.clear_draft())
 
+        self.action_new_folder = QAction("Nouveau dossier", self)
+        self.action_new_folder.setIcon(
+            style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder)
+        )
+        self.action_new_folder.triggered.connect(
+            lambda: self.tree_panel.create_folder()
+        )
+
         self.addAction(self.action_undo)
+        self.addAction(self.action_save)
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Barre d'outils", self)
@@ -108,7 +138,10 @@ class MainWindow(QMainWindow):
 
         toolbar.addAction(self.action_create)
         toolbar.addAction(self.action_undo)
+        toolbar.addAction(self.action_save)
         toolbar.addAction(self.action_clear)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_new_folder)
         toolbar.addSeparator()
 
         toolbar.addWidget(QLabel("  Fond de carte : "))
@@ -122,6 +155,10 @@ class MainWindow(QMainWindow):
         menu = self.menuBar()
 
         file_menu = menu.addMenu("&Fichier")
+        export_action = QAction("&Exporter la trace sélectionnée en GPX…", self)
+        export_action.triggered.connect(self._export_selected_track)
+        file_menu.addAction(export_action)
+        file_menu.addSeparator()
         quit_action = QAction("&Quitter", self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
         quit_action.triggered.connect(self.close)
@@ -130,7 +167,10 @@ class MainWindow(QMainWindow):
         edit_menu = menu.addMenu("&Trace")
         edit_menu.addAction(self.action_create)
         edit_menu.addAction(self.action_undo)
+        edit_menu.addAction(self.action_save)
         edit_menu.addAction(self.action_clear)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self.action_new_folder)
 
         view_menu = menu.addMenu("&Affichage")
         refresh_action = QAction("&Actualiser l'arborescence", self)
@@ -214,7 +254,99 @@ class MainWindow(QMainWindow):
         has_points = not self.draft.is_empty
         self.action_undo.setEnabled(has_points)
         self.action_clear.setEnabled(has_points)
+        self.action_save.setEnabled(len(self.draft) >= 2)
         self.draft_label.setText(self.draft.summary())
+
+    # ------------------------------------------------- sauvegarde (Jalon 4)
+
+    def save_draft(self, name: str | None = None) -> int | None:
+        """Enregistre le brouillon en base, dans le dossier sélectionné.
+
+        `name` sert aux tests ; sans lui, l'utilisateur est invité à le saisir.
+        Retourne l'identifiant de la trace créée, ou None si abandon.
+        """
+        if len(self.draft) < 2:
+            QMessageBox.information(
+                self,
+                "Trace incomplète",
+                "Une trace doit compter au moins deux points pour être "
+                "enregistrée.",
+            )
+            return None
+
+        if name is None:
+            name, accepted = QInputDialog.getText(
+                self, "Enregistrer la trace", "Nom de la trace :",
+                text=self.draft.name,
+            )
+            if not accepted or not name.strip():
+                return None
+
+        folder_id = self.tree_panel.current_folder_id()
+        track_id = self.db.create_track(
+            name, folder_id=folder_id, points=self.draft.points
+        )
+
+        self.draft.clear()
+        self.map_view.clear_draft()
+        self._update_draft_actions()
+
+        self.tree_panel.refresh()
+        self.tree_panel.select_track(track_id)
+        self.status_label.setText(f"Trace « {name} » enregistrée.")
+        return track_id
+
+    # ---------------------------------------------------- export GPX (J4)
+
+    def _export_selected_track(self) -> None:
+        kind, ident = self.tree_panel.current_selection()
+        if kind != KIND_TRACK:
+            QMessageBox.information(
+                self,
+                "Aucune trace sélectionnée",
+                "Sélectionnez une trace dans l'arborescence pour l'exporter.",
+            )
+            return
+        self.export_track(int(ident))
+
+    def export_track(self, track_id: int, path: str | None = None) -> str | None:
+        """Écrit une trace de la base dans un fichier GPX.
+
+        `path` sert aux tests ; sans lui, une boîte de dialogue est ouverte.
+        """
+        track = self.db.get_track(track_id, with_points=True)
+        if track is None:
+            return None
+        if not track.points:
+            QMessageBox.information(
+                self,
+                "Trace vide",
+                f"La trace « {track.name} » ne contient aucun point.",
+            )
+            return None
+
+        if path is None:
+            path, _filter = QFileDialog.getSaveFileName(
+                self,
+                "Exporter en GPX",
+                safe_filename(track.name),
+                "Fichiers GPX (*.gpx)",
+            )
+            if not path:
+                return None
+
+        try:
+            written = write_gpx(path, track.name, track.points, track.description)
+        except OSError as exc:
+            QMessageBox.critical(
+                self, "Échec de l'export", f"Impossible d'écrire le fichier :\n{exc}"
+            )
+            return None
+
+        self.status_label.setText(
+            f"Trace « {track.name} » exportée vers {written}."
+        )
+        return str(written)
 
     # -------------------------------------------------------------- signaux
 
