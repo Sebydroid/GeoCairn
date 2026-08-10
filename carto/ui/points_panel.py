@@ -20,6 +20,13 @@ from PyQt6.QtWidgets import (
 from ..editor import DraftTrack
 
 
+def format_elevation(ele: float | None) -> str:
+    """Altitude lisible ; « — » quand le fichier n'en donne pas."""
+    if ele is None:
+        return "—"
+    return f"{ele:.0f} m"
+
+
 class PointsPanel(QWidget):
     """Liste des points du brouillon, avec suppression et découpage."""
 
@@ -31,6 +38,8 @@ class PointsPanel(QWidget):
         super().__init__(parent)
 
         self.title = QLabel("Points de la trace", self)
+        self.header = QLabel("   n°       latitude ; longitude      altitude", self)
+        self.header.setEnabled(False)
         self.list = QListWidget(self)
         self.list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
@@ -58,6 +67,7 @@ class PointsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(self.title)
+        layout.addWidget(self.header)
         layout.addWidget(self.list)
         layout.addLayout(buttons)
 
@@ -75,6 +85,7 @@ class PointsPanel(QWidget):
         for index, point in enumerate(draft.points, start=0):
             self.list.addItem(
                 f"{index + 1:>4}   {point.lat:.5f} ; {point.lon:.5f}"
+                f"   {format_elevation(point.ele)}"
             )
         self._updating = False
 

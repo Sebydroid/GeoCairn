@@ -46,5 +46,7 @@ class Track:
     opacity: float = DEFAULT_TRACK_OPACITY
     description: str = ""
     is_loop: bool = False
+    #: Affichée sur la carte ; conservé d'un lancement à l'autre.
+    visible: bool = False
     point_count: int = 0
     points: list[Point] = field(default_factory=list)

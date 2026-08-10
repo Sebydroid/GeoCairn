@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMenu, QMessageBox
 
 from carto.app import create_app
 from carto.database import Database
@@ -276,17 +276,62 @@ def test_suppression_d_un_point_par_clic_droit(window):
     assert wait_for(lambda: js_draft(window) == 3, timeout_ms=5000)
 
 
-def test_clic_droit_sur_un_repere_remonte_vers_python(window):
+def test_clic_droit_sur_un_repere_ouvre_le_menu(window, monkeypatch):
+    """Le clic droit propose « Supprimer », il ne supprime plus directement."""
     track_id = trace_enregistree(window)
     window.resume_track(track_id)
     assert wait_for(lambda: js_draft(window) == 4, timeout_ms=5000)
 
+    proposees = []
+
+    def faux_exec(self, *args, **kwargs):
+        proposees.extend(a.text() for a in self.actions())
+        return None
+
+    monkeypatch.setattr(QMenu, "exec", faux_exec)
+
     run_js_sync(
         window.map_view,
-        "draft.vertices.getLayers()[0].fire('contextmenu', {originalEvent: {}}); true",
+        "draft.vertices.getLayers()[1].fire('contextmenu',"
+        " {originalEvent: {}, latlng: draft.line.getLatLngs()[1]}); true",
     )
 
-    assert wait_for(lambda: len(window.draft) == 3, timeout_ms=5000)
+    assert wait_for(lambda: bool(proposees), timeout_ms=5000)
+    assert any("Supprimer le point 2" in texte for texte in proposees)
+    assert any("Découper" in texte for texte in proposees)
+    assert len(window.draft) == 4  # rien n'a encore été supprimé
+
+
+def test_l_option_supprimer_retire_bien_le_point(window, monkeypatch):
+    track_id = trace_enregistree(window)
+    window.resume_track(track_id)
+
+    declenchees = []
+
+    def faux_exec(self, *args, **kwargs):
+        # Déclenche l'option « Supprimer », comme le ferait l'utilisateur.
+        for action in self.actions():
+            if action.text().startswith("Supprimer"):
+                declenchees.append(action.text())
+                action.trigger()
+        return None
+
+    monkeypatch.setattr(QMenu, "exec", faux_exec)
+    window.show_point_menu(1, 10, 10)
+
+    assert declenchees
+    assert len(window.draft) == 3
+    assert window.draft.points[1].as_tuple() == (48.932, 1.441)
+
+
+def test_le_menu_du_point_selectionne_le_point(window, monkeypatch):
+    track_id = trace_enregistree(window)
+    window.resume_track(track_id)
+    monkeypatch.setattr(QMenu, "exec", lambda self, *a, **k: None)
+
+    window.show_point_menu(2, 10, 10)
+
+    assert window.points_panel.selected_indexes() == [2]
 
 
 def test_suppression_d_une_selection_de_points(window):
@@ -390,6 +435,104 @@ def test_decoupage_impossible_aux_extremites(window):
 
     panel.select_index(3)
     assert panel.split_button.isEnabled() is False
+
+
+# ------------------------------- insertion d'un point sur un segment
+
+
+def test_insertion_d_un_point_sur_un_segment(window):
+    track_id = trace_enregistree(window)
+    window.resume_track(track_id)
+
+    assert window.insert_draft_point(2, 48.9315, 1.4415) is True
+
+    assert len(window.draft) == 5
+    assert window.draft.points[2].as_tuple() == (48.9315, 1.4415)
+    assert window.draft.points[3].as_tuple() == (48.932, 1.441)  # décalé
+    assert wait_for(lambda: js_draft(window) == 5, timeout_ms=5000)
+
+
+def test_clic_sur_la_ligne_insere_un_point(window):
+    """Un clic gauche sur un segment ajoute un point à cet endroit."""
+    track_id = trace_enregistree(window)
+    window.resume_track(track_id)
+    assert wait_for(lambda: js_draft(window) == 4, timeout_ms=5000)
+
+    # Point situé au milieu du segment entre le 1er et le 2e point.
+    run_js_sync(
+        window.map_view,
+        "draft.line.fire('click', {latlng: L.latLng(48.9305, 1.441),"
+        " originalEvent: {}}); true",
+    )
+
+    assert wait_for(lambda: len(window.draft) == 5, timeout_ms=5000)
+    assert window.draft.points[1].as_tuple() == (48.9305, 1.441)
+
+
+def test_le_clic_sur_la_ligne_n_ajoute_pas_a_la_fin(window):
+    """Régression : le clic était aussi relayé à la carte, ajoutant un point."""
+    track_id = trace_enregistree(window)
+    window.resume_track(track_id)
+    assert wait_for(lambda: js_draft(window) == 4, timeout_ms=5000)
+
+    run_js_sync(
+        window.map_view,
+        "draft.line.fire('click', {latlng: L.latLng(48.9305, 1.441),"
+        " originalEvent: {}});"
+        " map.fire('click', {latlng: L.latLng(48.9305, 1.441)}); true",
+    )
+    wait_for(lambda: False, timeout_ms=700)
+
+    assert len(window.draft) == 5
+    assert window.draft.points[-1].as_tuple() == (48.933, 1.439)
+
+
+def test_le_point_insere_est_selectionne(window):
+    track_id = trace_enregistree(window)
+    window.resume_track(track_id)
+
+    window.insert_draft_point(2, 48.9315, 1.4415)
+
+    assert window.points_panel.selected_indexes() == [2]
+
+
+def test_insertion_hors_bornes_refusee(window):
+    track_id = trace_enregistree(window)
+    window.resume_track(track_id)
+
+    assert window.insert_draft_point(99, 48.0, 1.0) is False
+    assert len(window.draft) == 4
+
+
+# ------------------------------------------------- altitude dans la liste
+
+
+def test_altitude_affichee_dans_la_liste(window):
+    points = [Point(48.930, 1.440, 70.0), Point(48.931, 1.442, 72.4),
+              Point(48.932, 1.441)]
+    track_id = window.db.create_track("Avec altitude", points=points)
+    window.tree_panel.refresh()
+
+    window.resume_track(track_id)
+
+    lignes = [
+        window.points_panel.list.item(i).text()
+        for i in range(window.points_panel.list.count())
+    ]
+    assert "70 m" in lignes[0]
+    assert "72 m" in lignes[1]
+    assert "—" in lignes[2]  # altitude absente du fichier
+
+
+def test_l_altitude_survit_au_deplacement_du_point(window):
+    points = [Point(48.930, 1.440, 70.0), Point(48.931, 1.442, 72.4)]
+    track_id = window.db.create_track("Avec altitude", points=points)
+    window.tree_panel.refresh()
+    window.resume_track(track_id)
+
+    window.move_draft_point(0, 48.95, 1.45)
+
+    assert "70 m" in window.points_panel.list.item(0).text()
 
 
 # ------------------------------------------------------- découpage (e)

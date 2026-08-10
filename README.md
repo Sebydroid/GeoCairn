@@ -116,23 +116,25 @@ emplacement (utilisée par les tests).
 
 Plusieurs traces peuvent être affichées en même temps, chacune avec sa couleur.
 
-- L'**ampoule** à gauche de chaque ligne allume ou éteint l'affichage. Sur un
-  dossier, elle agit sur toutes les traces qu'il contient, sous-dossiers
-  compris ; elle est à demi allumée quand une partie seulement est visible.
+- L'**ampoule**, juste à gauche du logo de la trace ou du dossier, allume ou
+  éteint l'affichage. Sur un dossier, elle agit sur toutes les traces qu'il
+  contient, sous-dossiers compris ; elle est à demi allumée quand une partie
+  seulement est visible.
 - Le **clic droit** propose *Afficher*, *Afficher seulement ceci*, *Masquer* et
   *Zoom sur la trace* (ou sur le dossier, qui cadre alors l'ensemble). Zoomer
   affiche la trace si elle était masquée.
 - **Double-cliquer** sur une trace l'affiche et cadre la carte dessus.
-- Le menu **Couleur** (clic droit sur une trace) propose huit teintes, et
-  *Couleur et transparence…* ouvre le sélecteur complet, canal alpha compris.
-  La couleur choisie teinte aussi le nom dans l'arborescence.
+- Le menu **Couleur** (clic droit sur une trace) propose huit teintes et un
+  sous-menu **Transparence** en pourcentage — 0 % pour une trace opaque, ou une
+  valeur libre jusqu'à 95 %. La couleur choisie teinte aussi le nom dans
+  l'arborescence.
 
 Chaque trace porte un repère vert au départ et rouge à l'arrivée, et son nom
 apparaît en infobulle au survol. Le brouillon en cours de saisie reste en rouge
 vif, distinct des traces enregistrées.
 
-L'affichage est un état de session : au prochain lancement, aucune trace n'est
-affichée. Couleur et transparence, elles, sont enregistrées avec la trace.
+Les traces affichées sont **mémorisées** : elles sont réaffichées au prochain
+lancement, avec leur couleur et leur transparence.
 
 ### Modifier une trace existante
 
@@ -140,12 +142,17 @@ affichée. Couleur et transparence, elles, sont enregistrées avec la trace.
 sélectionnée : ses points passent en édition, la carte se cadre dessus et le
 panneau du bas les liste un par un.
 
-- **Prolonger** : cliquer sur la carte ajoute des points à la suite.
+- **Prolonger** : cliquer sur la carte, en dehors du tracé, ajoute des points à
+  la suite.
+- **Insérer un point** : cliquer sur le tracé lui-même l'ajoute à cet endroit,
+  entre les deux points du segment visé.
 - **Déplacer un point** : le glisser à la souris.
 - **Sélectionner un point** : le cliquer sur la carte, ou cliquer sa ligne dans
-  le panneau ; il apparaît en jaune.
-- **Supprimer** : clic droit sur un point de la carte, ou sélection multiple
-  dans le panneau puis **Supprimer**.
+  le panneau ; il apparaît en jaune des deux côtés.
+- **Supprimer** : clic droit sur un point de la carte puis *Supprimer*, ou
+  sélection multiple dans le panneau puis **Supprimer**.
+
+Le panneau liste le numéro, les coordonnées et l'altitude de chaque point.
 - **Fermer la boucle** ramène le tracé à son point de départ.
 - **Découper ici** coupe la trace en deux au point sélectionné. Le point de
   coupure appartient aux deux moitiés, qui restent donc jointives. La seconde

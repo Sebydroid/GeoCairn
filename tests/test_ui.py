@@ -115,12 +115,6 @@ def test_barre_d_outils_sans_doublons(qapp, db):
     window.close()
 
 
-def test_le_selecteur_de_couches_reste_sur_la_carte(loaded_map):
-    """Les cinq fonds restent proposés par le contrôle Leaflet."""
-    assert run_js_sync(loaded_map, "carto.layerNames()") == LAYER_NAMES
-    assert any("OpenStreetMap" in nom for nom in LAYER_NAMES)
-    assert any("Satellite" in nom for nom in LAYER_NAMES)
-    assert any("IGN" in nom for nom in LAYER_NAMES)
 
 
 # -------------------------------------------------------------- arborescence
@@ -215,6 +209,16 @@ def test_carte_chargee_et_pont_actif(loaded_map):
 
 def test_couches_javascript_identiques_a_python(loaded_map):
     assert run_js_sync(loaded_map, "carto.layerNames()") == LAYER_NAMES
+
+
+def test_le_selecteur_de_couches_reste_sur_la_carte(loaded_map):
+    """Le fond de carte se choisit dans le contrôle Leaflet, pas dans la barre."""
+    noms = run_js_sync(loaded_map, "carto.layerNames()")
+
+    assert len(noms) == 5
+    assert any("OpenStreetMap" in nom for nom in noms)
+    assert any("Satellite" in nom for nom in noms)
+    assert any("IGN" in nom for nom in noms)
 
 
 def test_changement_de_couche(loaded_map):

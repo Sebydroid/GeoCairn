@@ -161,7 +161,12 @@
         });
         marker.on("contextmenu", function (e) {
             L.DomEvent.stop(e);
-            if (bridge) { bridge.js_point_context(marker.cartoIndex); }
+            justDragged = true;   // le clic droit ne doit rien ajouter
+            if (!bridge) { return; }
+            var point = e.containerPoint || map.latLngToContainerPoint(e.latlng);
+            bridge.js_point_context(
+                marker.cartoIndex, Math.round(point.x), Math.round(point.y)
+            );
         });
         marker.addTo(draft.vertices);
         return marker;
@@ -174,6 +179,34 @@
             addVertex(draft.latlngs[i], i);
         }
     }
+
+    // --- Clic sur un segment : insertion d'un point ------------------------
+    // Leaflet ne dit pas quel segment a été touché : on cherche le plus proche
+    // du point cliqué, en coordonnées écran.
+    function closestSegment(latlng) {
+        var cible = map.latLngToLayerPoint(latlng);
+        var meilleur = -1;
+        var distanceMin = Infinity;
+        for (var i = 0; i < draft.latlngs.length - 1; i++) {
+            var a = map.latLngToLayerPoint(draft.latlngs[i]);
+            var b = map.latLngToLayerPoint(draft.latlngs[i + 1]);
+            var d = L.LineUtil.pointToSegmentDistance(cible, a, b);
+            if (d < distanceMin) { distanceMin = d; meilleur = i; }
+        }
+        return meilleur;
+    }
+
+    draft.line.on("click", function (e) {
+        if (!draft.editing || draft.latlngs.length < 2) { return; }
+        L.DomEvent.stop(e);
+        // Le rendu canvas relaie aussi le clic à la carte : sans ce drapeau,
+        // un point serait ajouté à la fin en plus de l'insertion.
+        justDragged = true;
+        var segment = closestSegment(e.latlng);
+        if (segment >= 0 && bridge) {
+            bridge.js_point_inserted(segment + 1, e.latlng.lat, e.latlng.lng);
+        }
+    });
 
     // --- Déplacement d'un point à la souris --------------------------------
     // L.circleMarker n'est pas déplaçable nativement ; on gère le glissement
@@ -295,6 +328,15 @@
             draft.markers = [];
             selectedIndex = -1;
             return 0;
+        },
+
+        insertPoint: function (index, lat, lon) {
+            if (index < 0 || index > draft.latlngs.length) { return false; }
+            draft.latlngs.splice(index, 0, [lat, lon]);
+            draft.line.setLatLngs(draft.latlngs);
+            // Les indices suivants se décalent : il faut tout redessiner.
+            redrawVertices();
+            return true;
         },
 
         movePoint: function (index, lat, lon) {

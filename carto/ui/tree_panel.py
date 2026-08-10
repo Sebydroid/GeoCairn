@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QColorDialog,
-    QHeaderView,
     QInputDialog,
     QMenu,
     QMessageBox,
     QStyle,
+    QStyleOptionViewItem,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -19,11 +19,19 @@ from PyQt6.QtWidgets import (
 )
 
 from ..database import CycleError, Database, DuplicateNameError
-from .icons import BULB_OFF, BULB_ON, BULB_PARTIAL, bulb_icon
+from .icons import (
+    BULB_OFF,
+    BULB_ON,
+    BULB_PARTIAL,
+    BULB_WIDTH,
+    ICON_SIZE,
+    bulb_with,
+)
 
-#: Colonnes de l'arbre : l'ampoule d'affichage, puis le nom.
+#: L'arbre n'a qu'une colonne : l'ampoule est dessinée dans la même icône que
+#: le logo du dossier ou de la trace, juste à sa gauche.
 COL_BULB = 0
-COL_NAME = 1
+COL_NAME = 0
 
 #: Rôles de données portés par les items de l'arbre (colonne 0).
 ROLE_KIND = Qt.ItemDataRole.UserRole
@@ -45,6 +53,12 @@ COULEURS = [
     ("Rose", "#e050a0"),
     ("Noir", "#202020"),
 ]
+
+#: Pourcentages de transparence proposés au clic droit (0 % = opaque).
+TRANSPARENCES = [0, 25, 50, 75]
+
+#: Au-delà, la trace deviendrait introuvable sur la carte.
+TRANSPARENCE_MAX = 95
 
 
 def folder_of(item: QTreeWidgetItem | None) -> int | None:
@@ -91,6 +105,7 @@ class _TreeWidget(QTreeWidget):
     """
 
     item_dropped = pyqtSignal(str, int, object)
+    bulb_clicked = pyqtSignal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -98,6 +113,44 @@ class _TreeWidget(QTreeWidget):
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+
+    # --------------------------------------------------- clic sur l'ampoule
+
+    def icon_left(self, item: QTreeWidgetItem) -> int:
+        """Abscisse du bord gauche de l'icône, indentation comprise."""
+        index = self.indexFromItem(item, COL_NAME)
+        rect = self.visualRect(index)
+        option = QStyleOptionViewItem()
+        try:
+            self.initViewItemOption(option)
+            option.rect = rect
+            decoration = self.style().subElementRect(
+                QStyle.SubElement.SE_ItemViewItemDecoration, option, self
+            )
+            if decoration.width() > 0:
+                return decoration.left()
+        except (AttributeError, TypeError):
+            pass
+        return rect.left()
+
+    def is_bulb_click(self, item: QTreeWidgetItem, x: int) -> bool:
+        """Vrai si l'abscisse tombe sur l'ampoule plutôt que sur le reste."""
+        gauche = self.icon_left(item)
+        return gauche <= x < gauche + BULB_WIDTH
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        position = event.position().toPoint()
+        item = self.itemAt(position)
+        if (
+            item is not None
+            and event.button() == Qt.MouseButton.LeftButton
+            and self.is_bulb_click(item, position.x())
+        ):
+            # Événement consommé : cliquer l'ampoule ne doit pas non plus
+            # déplacer la sélection ni amorcer un glisser-déposer.
+            self.bulb_clicked.emit(item)
+            return
+        super().mousePressEvent(event)
 
     def _dragged_item(self) -> QTreeWidgetItem | None:
         item = self.currentItem()
@@ -177,22 +230,15 @@ class TreePanel(QWidget):
         self.visible_tracks = visible_tracks if visible_tracks is not None else set()
 
         self.tree = _TreeWidget(self)
-        self.tree.setColumnCount(2)
-        self.tree.setHeaderLabels(["", "Bibliothèque"])
-        # L'arborescence (indentation et flèches) se dessine dans la colonne du
-        # nom : sans cela, l'indentation décalerait l'ampoule des éléments
-        # imbriqués hors de sa colonne, qui la rognerait.
-        self.tree.setTreePosition(COL_NAME)
-        self.tree.header().setSectionResizeMode(
-            COL_BULB, QHeaderView.ResizeMode.Fixed
-        )
-        self.tree.setColumnWidth(COL_BULB, 26)
-        self.tree.header().setStretchLastSection(True)
+        self.tree.setHeaderLabel("Bibliothèque")
+        # Sans cela, l'icône composite (ampoule + logo) serait ramenée à la
+        # largeur d'une icône simple, donc écrasée.
+        self.tree.setIconSize(QSize(BULB_WIDTH + ICON_SIZE, ICON_SIZE))
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setUniformRowHeights(True)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.itemDoubleClicked.connect(self._on_double_click)
-        self.tree.itemClicked.connect(self._on_item_clicked)
+        self.tree.bulb_clicked.connect(self._on_bulb_clicked)
         self.tree.currentItemChanged.connect(self._on_current_changed)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.item_dropped.connect(self._on_item_dropped)
@@ -215,10 +261,9 @@ class TreePanel(QWidget):
         selected = self.current_selection()
 
         self.tree.clear()
-        root = QTreeWidgetItem(self.tree, ["", "Mes traces"])
+        root = QTreeWidgetItem(self.tree, ["Mes traces"])
         root.setData(COL_BULB, ROLE_KIND, KIND_ROOT)
         root.setData(COL_BULB, ROLE_ID, None)
-        root.setIcon(COL_NAME, self._folder_icon)
         root.setFlags(root.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
 
         self._populate(root, None)
@@ -230,19 +275,17 @@ class TreePanel(QWidget):
     def _populate(self, parent_item: QTreeWidgetItem, folder_id: int | None) -> None:
         """Ajoute récursivement sous-dossiers puis traces d'un dossier."""
         for folder in self.db.list_folders(folder_id):
-            item = QTreeWidgetItem(parent_item, ["", folder.name])
+            item = QTreeWidgetItem(parent_item, [folder.name])
             item.setData(COL_BULB, ROLE_KIND, KIND_FOLDER)
             item.setData(COL_BULB, ROLE_ID, folder.id)
-            item.setIcon(COL_NAME, self._folder_icon)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
             self._populate(item, folder.id)
 
         for track in self.db.list_tracks(folder_id):
             label = f"{track.name}  ({track.point_count} pts)"
-            item = QTreeWidgetItem(parent_item, ["", label])
+            item = QTreeWidgetItem(parent_item, [label])
             item.setData(COL_BULB, ROLE_KIND, KIND_TRACK)
             item.setData(COL_BULB, ROLE_ID, track.id)
-            item.setIcon(COL_NAME, self._track_icon)
             item.setForeground(COL_NAME, QColor(track.color))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
 
@@ -254,9 +297,12 @@ class TreePanel(QWidget):
             kind = item.data(COL_BULB, ROLE_KIND)
             if kind == KIND_TRACK:
                 visible = int(item.data(COL_BULB, ROLE_ID)) in self.visible_tracks
-                item.setIcon(COL_BULB, bulb_icon(BULB_ON if visible else BULB_OFF))
+                etat = BULB_ON if visible else BULB_OFF
+                base = self._track_icon
             else:
-                item.setIcon(COL_BULB, bulb_icon(self.folder_state(item)))
+                etat = self.folder_state(item)
+                base = self._folder_icon
+            item.setIcon(COL_NAME, bulb_with(etat, base))
 
     def folder_state(self, item: QTreeWidgetItem) -> str:
         """État d'affichage d'un dossier : toutes, certaines ou aucune trace."""
@@ -270,9 +316,7 @@ class TreePanel(QWidget):
             return BULB_ON
         return BULB_PARTIAL
 
-    def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
-        if column != COL_BULB:
-            return
+    def _on_bulb_clicked(self, item: QTreeWidgetItem) -> None:
         self.visibility_toggled.emit(
             item.data(COL_BULB, ROLE_KIND), item.data(COL_BULB, ROLE_ID)
         )
@@ -414,9 +458,36 @@ class TreePanel(QWidget):
                 lambda _checked=False, c=valeur: self.set_track_color(track_id, c)
             )
         menu.addSeparator()
+        menu.addMenu(self._build_transparency_menu(track_id, menu))
         menu.addAction(
-            "Couleur et transparence…",
+            "Couleur personnalisée…",
             lambda: self.choose_track_color(track_id),
+        )
+        return menu
+
+    def _build_transparency_menu(self, track_id: int, parent: QMenu) -> QMenu:
+        """Transparence exprimée en pourcentage : 0 % = trace opaque."""
+        menu = QMenu("Transparence", parent)
+        track = self.db.get_track(track_id)
+        actuel = (
+            round((1.0 - track.opacity) * 100) if track is not None else 0
+        )
+        for pourcentage in TRANSPARENCES:
+            libelle = f"{pourcentage} %"
+            if pourcentage == 0:
+                libelle += " (opaque)"
+            action = menu.addAction(libelle)
+            action.setCheckable(True)
+            action.setChecked(pourcentage == actuel)
+            action.triggered.connect(
+                lambda _checked=False, p=pourcentage: self.set_track_transparency(
+                    track_id, p
+                )
+            )
+        menu.addSeparator()
+        menu.addAction(
+            "Autre pourcentage…",
+            lambda: self.choose_track_transparency(track_id),
         )
         return menu
 
@@ -453,26 +524,51 @@ class TreePanel(QWidget):
         self.status_message.emit(f"Couleur de « {track.name} » modifiée.")
         return True
 
+    def set_track_transparency(self, track_id: int, pourcentage: int) -> bool:
+        """Applique une transparence exprimée en pourcentage (0 = opaque)."""
+        track = self.db.get_track(track_id)
+        if track is None:
+            return False
+        pourcentage = max(0, min(TRANSPARENCE_MAX, int(pourcentage)))
+        self.db.set_track_style(track_id, opacity=1.0 - pourcentage / 100)
+        self.style_changed.emit(track_id)
+        self.status_message.emit(
+            f"« {track.name} » : transparence {pourcentage} %."
+        )
+        return True
+
+    def choose_track_transparency(self, track_id: int) -> bool:
+        """Demande un pourcentage de transparence à l'utilisateur."""
+        track = self.db.get_track(track_id)
+        if track is None:
+            return False
+        actuel = round((1.0 - track.opacity) * 100)
+        pourcentage, accepte = QInputDialog.getInt(
+            self,
+            f"Transparence de « {track.name} »",
+            "Transparence en % (0 = opaque) :",
+            actuel,
+            0,
+            TRANSPARENCE_MAX,
+            5,
+        )
+        if not accepte:
+            return False
+        return self.set_track_transparency(track_id, pourcentage)
+
     def choose_track_color(self, track_id: int) -> bool:
-        """Ouvre le sélecteur de couleur, canal de transparence compris."""
+        """Ouvre le sélecteur de couleur. La transparence a son propre menu."""
         track = self.db.get_track(track_id)
         if track is None:
             return False
 
-        initiale = QColor(track.color)
-        initiale.setAlpha(int(round(track.opacity * 255)))
         choisie = QColorDialog.getColor(
-            initiale,
-            self,
-            f"Couleur de « {track.name} »",
-            QColorDialog.ColorDialogOption.ShowAlphaChannel,
+            QColor(track.color), self, f"Couleur de « {track.name} »"
         )
         if not choisie.isValid():
             return False
 
-        return self.set_track_color(
-            track_id, choisie.name(), choisie.alphaF()
-        )
+        return self.set_track_color(track_id, choisie.name())
 
     # --------------------------------------------------------- opérations
 

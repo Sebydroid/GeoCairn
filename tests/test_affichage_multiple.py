@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import pytest
 from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import QColorDialog, QMessageBox
+from PyQt6.QtWidgets import QColorDialog, QInputDialog, QMessageBox
 
 from carto.app import create_app
 from carto.database import Database
 from carto.models import Point
-from carto.ui.icons import BULB_OFF, BULB_ON, BULB_PARTIAL
+from carto.ui.icons import BULB_OFF, BULB_ON, BULB_PARTIAL, BULB_WIDTH
 from carto.ui.main_window import MainWindow
 from carto.ui.tree_panel import (
-    COL_BULB,
+    COL_NAME,
     KIND_FOLDER,
     KIND_ROOT,
     KIND_TRACK,
+    TRANSPARENCE_MAX,
     track_ids_under,
 )
 from tests.test_ui import run_js_sync, wait_for
@@ -132,6 +133,56 @@ def test_chaque_trace_garde_sa_couleur(window):
     ) == "#1f5fbf"
 
 
+# ------------------------------------------------- affichage mémorisé
+
+
+def test_l_affichage_est_ecrit_en_base(window):
+    a, b = deux_traces(window)
+
+    window.show_track(a)
+
+    assert window.db.get_track(a).visible is True
+    assert window.db.get_track(b).visible is False
+
+
+def test_le_masquage_est_ecrit_en_base(window):
+    a, _b = deux_traces(window)
+    window.show_track(a)
+
+    window.hide_track(a)
+
+    assert window.db.get_track(a).visible is False
+
+
+def test_liste_des_traces_a_reafficher(window):
+    a, b = deux_traces(window)
+    window.show_track(a)
+    window.show_track(b)
+    window.hide_track(a)
+
+    assert window.db.visible_track_ids() == [b]
+
+
+def test_la_reprise_ne_perd_pas_la_memorisation(window):
+    """La trace reprise sort de l'affichage simple mais reste mémorisée."""
+    a, _b = deux_traces(window)
+    window.show_track(a)
+
+    window.resume_track(a)
+
+    assert a not in window.visible_tracks
+    assert window.db.get_track(a).visible is True
+
+    window.draft.reset()
+    window.set_edit_mode(False)
+    window.map_view.clear_draft()
+
+
+def test_une_trace_neuve_n_est_pas_affichee_par_defaut(window):
+    a, _b = deux_traces(window)
+    assert window.db.get_track(a).visible is False
+
+
 # ------------------------------------------------------------- ampoules
 
 
@@ -152,48 +203,58 @@ def test_clic_sur_l_ampoule_affiche_puis_masque(window):
     assert bulb_state(window, KIND_TRACK, a) == BULB_OFF
 
 
-def test_l_ampoule_est_dans_la_premiere_colonne(window):
+def test_l_ampoule_est_accolee_au_nom(window):
+    """L'arbre n'a qu'une colonne : l'ampoule précède le logo dans l'icône."""
     a, _b = deux_traces(window)
     window.show_track(a)
 
+    tree = window.tree_panel.tree
     item = window.tree_panel.find_item(KIND_TRACK, a)
 
-    assert not item.icon(COL_BULB).isNull()
+    assert tree.columnCount() == 1
+    icone = item.icon(COL_NAME)
+    assert not icone.isNull()
+    # L'icône composite est plus large que haute : ampoule + logo.
+    taille = icone.availableSizes()[0]
+    assert taille.width() > taille.height()
+    # La vue doit lui laisser toute sa largeur, sans quoi elle serait écrasée.
+    assert tree.iconSize().width() >= taille.width()
+    assert tree.iconSize().height() >= taille.height()
 
 
-def test_l_arborescence_ne_rogne_pas_les_ampoules(window):
-    """Régression : l'indentation poussait l'ampoule hors de sa colonne.
-
-    Sans setTreePosition, seule la racine — non indentée — affichait la sienne ;
-    dossiers et traces avaient une colonne vide.
-    """
+def test_l_ampoule_reste_cliquable_en_profondeur(window):
+    """La zone cliquable suit l'indentation de l'élément."""
     dossier = window.db.create_folder("Rallye")
     sous = window.db.create_folder("2026", parent_id=dossier)
     profonde = window.db.create_track("Enfouie", folder_id=sous, points=TROIS)
     window.tree_panel.refresh()
-    window.show_track(profonde)
+    window.tree_panel.find_item(KIND_FOLDER, dossier).setExpanded(True)
+    window.tree_panel.find_item(KIND_FOLDER, sous).setExpanded(True)
 
     tree = window.tree_panel.tree
-    assert tree.treePosition() == 1, "l'indentation doit viser la colonne du nom"
-
+    racine = tree.topLevelItem(0)
     item = window.tree_panel.find_item(KIND_TRACK, profonde)
-    assert not item.icon(COL_BULB).isNull()
-    # L'ampoule reste dans la largeur de sa colonne, quelle que soit la
-    # profondeur de l'élément.
-    rect = tree.visualRect(tree.indexFromItem(item, COL_BULB))
-    assert rect.left() < tree.columnWidth(COL_BULB)
+
+    # Plus l'élément est profond, plus son icône est décalée vers la droite.
+    assert tree.icon_left(item) > tree.icon_left(racine)
+    assert tree.is_bulb_click(item, tree.icon_left(item) + 2) is True
+    assert tree.is_bulb_click(item, tree.icon_left(item) + BULB_WIDTH + 8) is False
+    # Un clic à l'emplacement de l'ampoule de la racine ne vise pas celle-ci.
+    assert tree.is_bulb_click(item, tree.icon_left(racine) + 2) is False
 
 
-def test_clic_sur_la_colonne_ampoule_bascule_l_affichage(window):
-    """Le clic doit agir sur la colonne 0 uniquement."""
+def test_clic_sur_l_ampoule_bascule_l_affichage_pas_le_nom(window):
     a, _b = deux_traces(window)
+    tree = window.tree_panel.tree
     item = window.tree_panel.find_item(KIND_TRACK, a)
+    gauche = tree.icon_left(item)
 
-    window.tree_panel._on_item_clicked(item, COL_BULB)
+    assert tree.is_bulb_click(item, gauche + 2) is True
+    window.tree_panel._on_bulb_clicked(item)
     assert a in window.visible_tracks
 
-    window.tree_panel._on_item_clicked(item, 1)  # colonne du nom
-    assert a in window.visible_tracks  # inchangé
+    # Un clic sur le texte est loin à droite : ce n'est pas l'ampoule.
+    assert tree.is_bulb_click(item, gauche + 120) is False
 
 
 def test_ampoule_de_dossier_partielle(window):
@@ -388,28 +449,82 @@ def test_la_couleur_teinte_le_nom_dans_l_arborescence(window):
     window.tree_panel.set_track_color(a, "#e6194b")
 
     item = window.tree_panel.find_item(KIND_TRACK, a)
-    assert item.foreground(1).color().name() == "#e6194b"
+    assert item.foreground(COL_NAME).color().name() == "#e6194b"
 
 
-def test_couleur_et_transparence_personnalisees(window, monkeypatch):
+def test_couleur_personnalisee(window, monkeypatch):
     a, _b = deux_traces(window)
     window.show_track(a)
-
-    choisie = QColor("#8b2fc9")
-    choisie.setAlpha(102)  # 40 %
-    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *a, **k: choisie))
+    monkeypatch.setattr(
+        QColorDialog, "getColor", staticmethod(lambda *a, **k: QColor("#8b2fc9"))
+    )
 
     assert window.tree_panel.choose_track_color(a) is True
 
-    track = window.db.get_track(a)
-    assert track.color == "#8b2fc9"
-    assert track.opacity == pytest.approx(0.4, abs=0.01)
+    assert window.db.get_track(a).color == "#8b2fc9"
+    assert wait_for(
+        lambda: run_js_sync(
+            window.map_view, f"shownTracks[{a}].line.options.color"
+        ) == "#8b2fc9",
+        timeout_ms=5000,
+    )
+
+
+# ------------------------------------------------- transparence en %
+
+
+@pytest.mark.parametrize(
+    "pourcentage, opacite", [(0, 1.0), (25, 0.75), (50, 0.5), (75, 0.25)]
+)
+def test_transparence_en_pourcentage(window, pourcentage, opacite):
+    a, _b = deux_traces(window)
+
+    assert window.tree_panel.set_track_transparency(a, pourcentage) is True
+
+    assert window.db.get_track(a).opacity == pytest.approx(opacite)
+
+
+def test_la_transparence_s_applique_sur_la_carte(window):
+    a, _b = deux_traces(window)
+    window.show_track(a)
+
+    window.tree_panel.set_track_transparency(a, 60)
+
     assert wait_for(
         lambda: run_js_sync(
             window.map_view, f"shownTracks[{a}].line.options.opacity"
         ) == pytest.approx(0.4, abs=0.01),
         timeout_ms=5000,
     )
+
+
+def test_transparence_bornee_pour_rester_visible(window):
+    a, _b = deux_traces(window)
+
+    window.tree_panel.set_track_transparency(a, 100)
+
+    # 100 % rendrait la trace introuvable : la valeur est ramenée au maximum.
+    assert window.db.get_track(a).opacity == pytest.approx(1 - TRANSPARENCE_MAX / 100)
+
+
+def test_transparence_saisie_par_l_utilisateur(window, monkeypatch):
+    a, _b = deux_traces(window)
+    monkeypatch.setattr(
+        QInputDialog, "getInt", staticmethod(lambda *a, **k: (30, True))
+    )
+
+    assert window.tree_panel.choose_track_transparency(a) is True
+    assert window.db.get_track(a).opacity == pytest.approx(0.7)
+
+
+def test_annulation_de_la_saisie_de_transparence(window, monkeypatch):
+    a, _b = deux_traces(window)
+    monkeypatch.setattr(
+        QInputDialog, "getInt", staticmethod(lambda *a, **k: (30, False))
+    )
+
+    assert window.tree_panel.choose_track_transparency(a) is False
+    assert window.db.get_track(a).opacity == pytest.approx(0.9)
 
 
 def test_annulation_du_selecteur_de_couleur(window, monkeypatch):

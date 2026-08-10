@@ -17,7 +17,14 @@ _COULEURS = {
     BULB_PARTIAL: ("#b8860b", "#fff3c4"),
 }
 
+#: Largeur de la zone cliquable de l'ampoule, dans l'icône composite.
+BULB_WIDTH = 18
+
+#: Côté des icônes de l'arborescence.
+ICON_SIZE = 16
+
 _cache: dict[tuple[str, int], QIcon] = {}
+_cache_composite: dict[tuple[str, int, int], QIcon] = {}
 
 
 def bulb_icon(state: str, size: int = 16) -> QIcon:
@@ -73,4 +80,27 @@ def bulb_icon(state: str, size: int = 16) -> QIcon:
 
     icone = QIcon(pixmap)
     _cache[cle] = icone
+    return icone
+
+
+def bulb_with(state: str, base: QIcon, size: int = 16) -> QIcon:
+    """Ampoule suivie de l'icône de l'élément, en une seule image.
+
+    Un item d'arbre n'accepte qu'une icône par colonne : les deux sont donc
+    dessinées côte à côte, l'ampoule occupant les `BULB_WIDTH` premiers pixels.
+    """
+    cle = (state, size, id(base))
+    if cle in _cache_composite:
+        return _cache_composite[cle]
+
+    pixmap = QPixmap(BULB_WIDTH + size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.drawPixmap(0, 0, bulb_icon(state, size).pixmap(size, size))
+    painter.drawPixmap(BULB_WIDTH, 0, base.pixmap(size, size))
+    painter.end()
+
+    icone = QIcon(pixmap)
+    _cache_composite[cle] = icone
     return icone

@@ -31,8 +31,9 @@ class MapBridge(QObject):
     layer_changed = pyqtSignal(str)
     undo_requested = pyqtSignal()
     point_moved = pyqtSignal(int, float, float)
-    point_context = pyqtSignal(int)
+    point_context = pyqtSignal(int, int, int)
     point_selected = pyqtSignal(int)
+    point_inserted = pyqtSignal(int, float, float)
 
     @pyqtSlot()
     def js_ready(self) -> None:
@@ -46,13 +47,17 @@ class MapBridge(QObject):
     def js_point_moved(self, index: int, lat: float, lon: float) -> None:
         self.point_moved.emit(index, lat, lon)
 
-    @pyqtSlot(int)
-    def js_point_context(self, index: int) -> None:
-        self.point_context.emit(index)
+    @pyqtSlot(int, int, int)
+    def js_point_context(self, index: int, x: int, y: int) -> None:
+        self.point_context.emit(index, x, y)
 
     @pyqtSlot(int)
     def js_point_selected(self, index: int) -> None:
         self.point_selected.emit(index)
+
+    @pyqtSlot(int, float, float)
+    def js_point_inserted(self, index: int, lat: float, lon: float) -> None:
+        self.point_inserted.emit(index, lat, lon)
 
     @pyqtSlot(float, float)
     def js_map_click(self, lat: float, lon: float) -> None:
@@ -85,8 +90,9 @@ class MapView(QWebEngineView):
     layer_changed = pyqtSignal(str)
     undo_requested = pyqtSignal()
     point_moved = pyqtSignal(int, float, float)
-    point_context = pyqtSignal(int)
+    point_context = pyqtSignal(int, int, int)
     point_selected = pyqtSignal(int)
+    point_inserted = pyqtSignal(int, float, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -115,6 +121,7 @@ class MapView(QWebEngineView):
         self.bridge.point_moved.connect(self.point_moved)
         self.bridge.point_context.connect(self.point_context)
         self.bridge.point_selected.connect(self.point_selected)
+        self.bridge.point_inserted.connect(self.point_inserted)
 
         self._channel = QWebChannel(self._page)
         self._channel.registerObject("bridge", self.bridge)
@@ -163,6 +170,10 @@ class MapView(QWebEngineView):
 
     def clear_draft(self) -> None:
         self.run_js("carto.clearDraft();")
+
+    def insert_draft_point(self, index: int, lat: float, lon: float) -> None:
+        """Insère un point dans la polyligne du brouillon."""
+        self.run_js(f"carto.insertPoint({int(index)}, {lat!r}, {lon!r});")
 
     def move_draft_point(self, index: int, lat: float, lon: float) -> None:
         """Repositionne un point du brouillon sur la carte."""

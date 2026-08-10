@@ -80,6 +80,19 @@ class DraftTrack:
             return None
         return self._points.pop()
 
+    def insert_point(
+        self, index: int, lat: float, lon: float, ele: float | None = None
+    ) -> Point | None:
+        """Insère un point à la position `index` (clic sur un segment).
+
+        Retourne None si la position est hors du tracé.
+        """
+        if not 0 <= index <= len(self._points):
+            return None
+        point = Point(lat, lon, ele)
+        self._points.insert(index, point)
+        return point
+
     def move_point(self, index: int, lat: float, lon: float) -> bool:
         """Repositionne un point existant. Altitude et horodatage sont conservés."""
         if not 0 <= index < len(self._points):

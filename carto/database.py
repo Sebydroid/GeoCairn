@@ -15,7 +15,7 @@ from .models import (
     Track,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     opacity     REAL    NOT NULL DEFAULT 0.9,
     description TEXT    NOT NULL DEFAULT '',
     is_loop     INTEGER NOT NULL DEFAULT 0,
+    visible     INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -115,15 +116,17 @@ class Database:
         if version >= SCHEMA_VERSION:
             return
 
-        if version < 2:
-            colonnes = {
-                r["name"] for r in self.conn.execute("PRAGMA table_info(tracks)")
-            }
-            if "opacity" not in colonnes:
-                self.conn.execute(
-                    "ALTER TABLE tracks ADD COLUMN opacity REAL NOT NULL "
-                    "DEFAULT 0.9"
-                )
+        colonnes = {
+            r["name"] for r in self.conn.execute("PRAGMA table_info(tracks)")
+        }
+        if version < 2 and "opacity" not in colonnes:
+            self.conn.execute(
+                "ALTER TABLE tracks ADD COLUMN opacity REAL NOT NULL DEFAULT 0.9"
+            )
+        if version < 3 and "visible" not in colonnes:
+            self.conn.execute(
+                "ALTER TABLE tracks ADD COLUMN visible INTEGER NOT NULL DEFAULT 0"
+            )
 
         self.conn.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'",
@@ -290,6 +293,7 @@ class Database:
             opacity=row["opacity"],
             description=row["description"],
             is_loop=bool(row["is_loop"]),
+            visible=bool(row["visible"]),
             point_count=row["point_count"],
         )
         if with_points:
@@ -327,6 +331,23 @@ class Database:
                 " WHERE id = ?",
                 (name, track_id),
             )
+
+    def set_track_visible(self, track_id: int, visible: bool) -> None:
+        """Mémorise si la trace doit être affichée à la réouverture."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE tracks SET visible = ? WHERE id = ?",
+                (int(bool(visible)), track_id),
+            )
+
+    def visible_track_ids(self) -> list[int]:
+        """Traces à réafficher au lancement."""
+        return [
+            row["id"]
+            for row in self.conn.execute(
+                "SELECT id FROM tracks WHERE visible = 1 ORDER BY id"
+            )
+        ]
 
     def set_track_style(
         self,

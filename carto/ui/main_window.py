@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
     QFileDialog,
     QInputDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QSplitter,
     QStyle,
@@ -47,8 +48,10 @@ class MainWindow(QMainWindow):
         #: Trace en cours de saisie, conservée en mémoire (Jalon 3).
         self.draft = DraftTrack()
         #: Traces enregistrées actuellement affichées sur la carte.
-        #: État de session : il n'est pas conservé d'un lancement à l'autre.
+        #: L'état est conservé en base d'un lancement à l'autre.
         self.visible_tracks: set[int] = set()
+        #: Vrai dès la fermeture : plus aucun accès à la base ne doit avoir lieu.
+        self._closing = False
 
         self.tree_panel = TreePanel(self.db, self.visible_tracks, self)
         self.points_panel = PointsPanel(self)
@@ -81,8 +84,9 @@ class MainWindow(QMainWindow):
         self.map_view.layer_changed.connect(self._on_layer_changed_from_map)
         self.map_view.undo_requested.connect(self.undo_last_point)
         self.map_view.point_moved.connect(self.move_draft_point)
-        self.map_view.point_context.connect(self.remove_draft_point)
+        self.map_view.point_context.connect(self.show_point_menu)
         self.map_view.point_selected.connect(self.select_draft_point)
+        self.map_view.point_inserted.connect(self.insert_draft_point)
 
         self.tree_panel.export_requested.connect(self.export_track)
         self.tree_panel.status_message.connect(self.status_label.setText)
@@ -351,8 +355,9 @@ class MainWindow(QMainWindow):
         self.draft.load_track(track)
         self._show_draft_on_map(fit=True)
         # La trace passe en édition (rouge) : la garder aussi en affichage
-        # simple (bleu) superposerait deux tracés identiques.
-        self.hide_track(track_id)
+        # simple (bleu) superposerait deux tracés identiques. Elle reste
+        # mémorisée comme affichée pour la prochaine ouverture.
+        self.hide_track(track_id, remember=False)
         self.set_edit_mode(True)
         self._update_draft_actions()
         self.status_label.setText(
@@ -431,8 +436,40 @@ class MainWindow(QMainWindow):
         )
         return True
 
+    def insert_draft_point(self, index: int, lat: float, lon: float) -> bool:
+        """Insère un point sur un segment du tracé (clic sur la ligne)."""
+        if self.draft.insert_point(index, lat, lon) is None:
+            return False
+        self.map_view.insert_draft_point(index, lat, lon)
+        self._update_draft_actions()
+        self.points_panel.select_index(index)
+        self.map_view.select_draft_point(index)
+        self.status_label.setText(
+            f"Point inséré en position {index + 1} sur {len(self.draft)}."
+        )
+        return True
+
+    def show_point_menu(self, index: int, x: int, y: int) -> None:
+        """Menu au clic droit sur un point de la trace en édition."""
+        if not 0 <= index < len(self.draft):
+            return
+        self.select_draft_point(index)
+
+        menu = QMenu(self)
+        menu.addAction(
+            f"Supprimer le point {index + 1}",
+            lambda: self.remove_draft_point(index),
+        )
+        action_decoupe = menu.addAction(
+            "Découper la trace ici", lambda: self.split_draft(index)
+        )
+        action_decoupe.setEnabled(
+            self.draft.is_existing and 1 <= index <= len(self.draft) - 2
+        )
+        menu.exec(self.map_view.mapToGlobal(QPoint(int(x), int(y))))
+
     def remove_draft_point(self, index: int) -> bool:
-        """Supprime un point précis (clic droit sur la carte)."""
+        """Supprime un point précis."""
         return self.remove_draft_points([index])
 
     def remove_draft_points(self, indexes: list[int]) -> bool:
@@ -691,6 +728,8 @@ class MainWindow(QMainWindow):
             track_id, track.points, track.color, track.opacity, name=track.name
         )
         self.visible_tracks.add(track_id)
+        if not track.visible:
+            self.db.set_track_visible(track_id, True)
         self.tree_panel.refresh_bulbs()
 
         longueur = format_length(total_length(track.points))
@@ -700,12 +739,19 @@ class MainWindow(QMainWindow):
         )
         return True
 
-    def hide_track(self, track_id: int) -> bool:
-        """Retire une trace de la carte."""
+    def hide_track(self, track_id: int, remember: bool = True) -> bool:
+        """Retire une trace de la carte.
+
+        `remember=False` sert à la reprise en édition : la trace disparaît de
+        l'affichage simple, mais reste marquée comme affichée pour le prochain
+        lancement.
+        """
         if track_id not in self.visible_tracks:
             return False
         self.map_view.hide_track(track_id)
         self.visible_tracks.discard(track_id)
+        if remember:
+            self.db.set_track_visible(track_id, False)
         self.tree_panel.refresh_bulbs()
         return True
 
@@ -845,6 +891,11 @@ class MainWindow(QMainWindow):
     # -------------------------------------------------------------- signaux
 
     def _on_map_ready(self) -> None:
+        # La carte peut finir de charger après la fermeture de la fenêtre : la
+        # base serait alors close, et l'exception levée dans ce slot Qt ferait
+        # avorter le processus.
+        if self._closing:
+            return
         self.status_label.setText("Carte prête.")
         # Réapplique l'état courant à une carte fraîchement chargée.
         self.map_view.set_edit_mode(self.edit_mode)
@@ -852,8 +903,14 @@ class MainWindow(QMainWindow):
             # Recadrer aussi : les appels émis avant le chargement de la page
             # sont perdus, y compris le cadrage initial de la reprise.
             self._show_draft_on_map(fit=True)
-        for track_id in sorted(self.visible_tracks):
+        # Réaffiche ce qui était visible à la fermeture précédente.
+        for track_id in self.db.visible_track_ids():
             self.show_track(track_id)
+        if self.visible_tracks:
+            self.map_view.zoom_tracks(sorted(self.visible_tracks))
+            self.status_label.setText(
+                f"{len(self.visible_tracks)} trace(s) réaffichée(s)."
+            )
 
     def _on_view_changed(self, lat: float, lon: float, zoom: int) -> None:
         self.coord_label.setText(f"Centre : {lat:.5f} ; {lon:.5f}  —  zoom {zoom}")
@@ -878,5 +935,23 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event):  # noqa: N802
+        self._closing = True
+        # Couper les remontées de la carte avant de fermer la base : un appel
+        # tardif touchant une base close ferait avorter le processus.
+        for signal in (
+            self.map_view.map_ready,
+            self.map_view.map_clicked,
+            self.map_view.view_changed,
+            self.map_view.layer_changed,
+            self.map_view.undo_requested,
+            self.map_view.point_moved,
+            self.map_view.point_context,
+            self.map_view.point_selected,
+            self.map_view.point_inserted,
+        ):
+            try:
+                signal.disconnect()
+            except TypeError:
+                pass
         self.db.close()
         super().closeEvent(event)
