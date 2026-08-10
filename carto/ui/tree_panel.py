@@ -51,6 +51,10 @@ class _TreeWidget(QTreeWidget):
     Le déplacement n'est pas appliqué par Qt : il est signalé, écrit en base,
     puis l'arbre est reconstruit. Une seule source de vérité, pas de risque de
     divergence entre l'affichage et les données.
+
+    Corollaire : dropEvent doit retenir IgnoreAction. Avec MoveAction, Qt
+    supprimerait la ligne d'origine une fois dropEvent terminé, c'est-à-dire
+    après notre reconstruction — l'élément déplacé disparaîtrait de l'affichage.
     """
 
     item_dropped = pyqtSignal(str, int, object)
@@ -98,7 +102,12 @@ class _TreeWidget(QTreeWidget):
         kind = dragged.data(0, ROLE_KIND)
         destination = folder_of(target)
 
-        event.setDropAction(Qt.DropAction.MoveAction)
+        # IgnoreAction, surtout pas MoveAction : après le retour de dropEvent,
+        # QAbstractItemView.startDrag() supprime la ligne d'origine si l'action
+        # retenue est MoveAction. Comme nous avons déjà reconstruit l'arbre
+        # depuis la base, cette suppression retirerait l'élément fraîchement
+        # replacé — il ne réapparaissait qu'au rafraîchissement suivant.
+        event.setDropAction(Qt.DropAction.IgnoreAction)
         event.accept()
         self.item_dropped.emit(kind, int(dragged.data(0, ROLE_ID)), destination)
 

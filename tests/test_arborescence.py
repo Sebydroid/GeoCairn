@@ -199,27 +199,104 @@ def test_deplacement_sans_effet_si_meme_dossier(panel, db, sample_points):
     assert panel.move_track(track_id, None) is False
 
 
-def test_depot_reel_sur_un_dossier(panel, db, sample_points):
-    """Simule un vrai QDropEvent, comme le fait le glisser-déposer de Qt."""
-    folder_id = panel.create_folder("Alpes")
-    track_id = db.create_track("Trace", points=sample_points)
-    panel.refresh()
-
-    track_item = panel.find_item(KIND_TRACK, track_id)
-    folder_item = panel.find_item(KIND_FOLDER, folder_id)
-    panel.tree.setCurrentItem(track_item)
-
-    cible = QPointF(panel.tree.visualItemRect(folder_item).center())
+def deposer(panel, source_item, cible_item) -> QDropEvent:
+    """Simule un vrai QDropEvent de `source_item` sur `cible_item`."""
+    panel.tree.setCurrentItem(source_item)
     event = QDropEvent(
-        cible,
+        QPointF(panel.tree.visualItemRect(cible_item).center()),
         Qt.DropAction.MoveAction,
         QMimeData(),
         Qt.MouseButton.LeftButton,
         Qt.KeyboardModifier.NoModifier,
     )
     panel.tree.dropEvent(event)
+    return event
+
+
+def test_depot_reel_sur_un_dossier(panel, db, sample_points):
+    """Simule un vrai QDropEvent, comme le fait le glisser-déposer de Qt."""
+    folder_id = panel.create_folder("Alpes")
+    track_id = db.create_track("Trace", points=sample_points)
+    panel.refresh()
+
+    deposer(
+        panel,
+        panel.find_item(KIND_TRACK, track_id),
+        panel.find_item(KIND_FOLDER, folder_id),
+    )
 
     assert db.get_track(track_id).folder_id == folder_id
+
+
+def test_element_visible_a_sa_nouvelle_place_apres_depot(panel, db, sample_points):
+    """Régression : la trace doit apparaître immédiatement dans le dossier."""
+    folder_id = panel.create_folder("Alpes")
+    track_id = db.create_track("Trace", points=sample_points)
+    panel.refresh()
+
+    deposer(
+        panel,
+        panel.find_item(KIND_TRACK, track_id),
+        panel.find_item(KIND_FOLDER, folder_id),
+    )
+
+    item = panel.find_item(KIND_TRACK, track_id)
+    assert item is not None, "la trace a disparu de l'arborescence"
+    assert folder_of(item) == folder_id
+    assert item_labels(panel, panel.find_item(KIND_FOLDER, folder_id)) == [
+        "Trace  (4 pts)"
+    ]
+
+
+def simuler_nettoyage_qt(panel, event) -> None:
+    """Reproduit ce que fait Qt une fois dropEvent terminé.
+
+    QAbstractItemView.startDrag() supprime les lignes sélectionnées lorsque
+    l'action retenue est MoveAction. Comme l'arbre a déjà été reconstruit
+    depuis la base, cette suppression frappe l'élément fraîchement replacé.
+    """
+    if event.dropAction() != Qt.DropAction.MoveAction:
+        return
+    for index in panel.tree.selectedIndexes():
+        panel.tree.model().removeRow(index.row(), index.parent())
+
+
+def test_le_depot_ne_laisse_pas_qt_supprimer_la_ligne(panel, db, sample_points):
+    """Régression : c'est ce qui vidait l'affichage après un déplacement."""
+    folder_id = panel.create_folder("Alpes")
+    track_id = db.create_track("Trace", points=sample_points)
+    panel.refresh()
+
+    event = deposer(
+        panel,
+        panel.find_item(KIND_TRACK, track_id),
+        panel.find_item(KIND_FOLDER, folder_id),
+    )
+    simuler_nettoyage_qt(panel, event)
+
+    assert panel.find_item(KIND_TRACK, track_id) is not None, (
+        "la trace a été effacée par le nettoyage de Qt après le dépôt"
+    )
+    assert event.isAccepted() is True
+    assert event.dropAction() != Qt.DropAction.MoveAction
+
+
+def test_dossier_visible_a_sa_nouvelle_place_apres_depot(panel, db):
+    """Régression : même symptôme pour un dossier déplacé."""
+    alpes = panel.create_folder("Alpes")
+    panel.select_folder(None)
+    jura = panel.create_folder("Jura")
+
+    event = deposer(
+        panel,
+        panel.find_item(KIND_FOLDER, jura),
+        panel.find_item(KIND_FOLDER, alpes),
+    )
+
+    assert event.dropAction() != Qt.DropAction.MoveAction
+    item = panel.find_item(KIND_FOLDER, jura)
+    assert item is not None, "le dossier a disparu de l'arborescence"
+    assert item.parent() is panel.find_item(KIND_FOLDER, alpes)
 
 
 def test_un_dossier_peut_etre_glisse(panel, db):
@@ -325,18 +402,10 @@ def test_depot_reel_d_un_dossier(panel, db):
     panel.select_folder(None)
     jura = panel.create_folder("Jura")
 
-    panel.tree.setCurrentItem(panel.find_item(KIND_FOLDER, jura))
-    cible = QPointF(
-        panel.tree.visualItemRect(panel.find_item(KIND_FOLDER, alpes)).center()
-    )
-    panel.tree.dropEvent(
-        QDropEvent(
-            cible,
-            Qt.DropAction.MoveAction,
-            QMimeData(),
-            Qt.MouseButton.LeftButton,
-            Qt.KeyboardModifier.NoModifier,
-        )
+    deposer(
+        panel,
+        panel.find_item(KIND_FOLDER, jura),
+        panel.find_item(KIND_FOLDER, alpes),
     )
 
     assert db.get_folder(jura).parent_id == alpes
@@ -348,18 +417,11 @@ def test_depot_d_un_dossier_sur_sa_descendance_ignore(panel, db):
     sous = panel.create_folder("2026")
     panel.find_item(KIND_FOLDER, alpes).setExpanded(True)
 
-    panel.tree.setCurrentItem(panel.find_item(KIND_FOLDER, alpes))
-    cible = QPointF(
-        panel.tree.visualItemRect(panel.find_item(KIND_FOLDER, sous)).center()
+    event = deposer(
+        panel,
+        panel.find_item(KIND_FOLDER, alpes),
+        panel.find_item(KIND_FOLDER, sous),
     )
-    event = QDropEvent(
-        cible,
-        Qt.DropAction.MoveAction,
-        QMimeData(),
-        Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.NoModifier,
-    )
-    panel.tree.dropEvent(event)
 
     assert event.isAccepted() is False
     assert db.get_folder(alpes).parent_id is None
