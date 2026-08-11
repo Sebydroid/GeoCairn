@@ -132,9 +132,10 @@
     draft.vertices.addTo(map);
 
     var selectedIndex = -1;
+    var selectedSet = {};   // indices mis en évidence (sélection multiple)
 
     function vertexStyle(index) {
-        if (index === selectedIndex) {
+        if (index === selectedIndex || selectedSet[index]) {
             return {
                 radius: 8, color: "#b8860b", fillColor: "#ffd700",
                 fillOpacity: 1, weight: 3
@@ -250,7 +251,8 @@
     // Plusieurs traces peuvent être visibles simultanément ; chacune a sa
     // polyligne, ses repères de départ/arrivée, sa couleur et son opacité.
     var shownTracks = {};   // identifiant -> { line, ends, arrows }
-    var focusMarker = null; // point désigné sur une trace consultée
+    var focusGroup = L.layerGroup();   // points désignés sur une trace consultée
+    focusGroup.addTo(map);
 
     function endStyle(couleur, remplissage, opacity) {
         return {
@@ -412,8 +414,14 @@
 
         selectPoint: function (index) {
             var ancien = selectedIndex;
+            var anciens = Object.keys(selectedSet);
             selectedIndex = (index === null || index === undefined) ? -1 : index;
-            // Seuls deux repères changent d'aspect : l'ancien et le nouveau.
+            selectedSet = {};
+            // Seuls les repères concernés changent d'aspect : redessiner toute
+            // la trace coûterait cher sur plusieurs milliers de points.
+            anciens.forEach(function (i) {
+                if (draft.markers[i]) { draft.markers[i].setStyle(vertexStyle(+i)); }
+            });
             if (draft.markers[ancien]) {
                 draft.markers[ancien].setStyle(vertexStyle(ancien));
             }
@@ -424,24 +432,56 @@
             return selectedIndex;
         },
 
+        selectPoints: function (indexes) {
+            var anciens = Object.keys(selectedSet).concat([selectedIndex]);
+            selectedSet = {};
+            (indexes || []).forEach(function (i) { selectedSet[i] = true; });
+            selectedIndex = -1;
+            anciens.concat(indexes || []).forEach(function (i) {
+                if (draft.markers[i]) { draft.markers[i].setStyle(vertexStyle(+i)); }
+            });
+            return Object.keys(selectedSet).length;
+        },
+
+        selectedPoints: function () {
+            return Object.keys(selectedSet).map(Number).sort(function (a, b) {
+                return a - b;
+            });
+        },
+
+        // Repères posés sur une trace consultée, pour une sélection multiple.
+        focusPoints: function (coords) {
+            carto.clearFocus();
+            (coords || []).forEach(function (c) {
+                focusGroup.addLayer(L.circleMarker([c[0], c[1]], {
+                    radius: 6, color: "#b8860b", fillColor: "#ffd700",
+                    fillOpacity: 1, weight: 2
+                }));
+            });
+            if (coords && coords.length) { map.panTo([coords[0][0], coords[0][1]]); }
+            return focusGroup.getLayers().length;
+        },
+
+        focusCount: function () { return focusGroup.getLayers().length; },
+
         // Repère indépendant du brouillon : sert à désigner un point d'une
         // trace simplement consultée.
         focusPoint: function (lat, lon) {
-            if (focusMarker) { map.removeLayer(focusMarker); }
-            focusMarker = L.circleMarker([lat, lon], {
+            carto.clearFocus();
+            focusGroup.addLayer(L.circleMarker([lat, lon], {
                 radius: 8, color: "#b8860b", fillColor: "#ffd700",
                 fillOpacity: 1, weight: 3
-            }).addTo(map);
+            }));
             map.panTo([lat, lon]);
             return true;
         },
 
         clearFocus: function () {
-            if (focusMarker) { map.removeLayer(focusMarker); focusMarker = null; }
+            focusGroup.clearLayers();
             return true;
         },
 
-        hasFocus: function () { return focusMarker !== null; },
+        hasFocus: function () { return focusGroup.getLayers().length > 0; },
 
         selectedPoint: function () { return selectedIndex; },
         draftCount: function () { return draft.latlngs.length; },

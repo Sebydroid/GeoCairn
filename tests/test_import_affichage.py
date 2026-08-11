@@ -92,7 +92,7 @@ def test_trace_importee_apparait_dans_l_arborescence(window, tmp_path):
 
     root = window.tree_panel.tree.topLevelItem(0)
     labels = [root.child(i).text(COL_NAME) for i in range(root.childCount())]
-    assert labels == ["Boucle  (3 pts)"]
+    assert labels == ["Boucle"]
     assert window.tree_panel.current_selection() == (KIND_TRACK, created[0])
 
 

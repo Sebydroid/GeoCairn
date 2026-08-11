@@ -259,17 +259,36 @@ def test_source_indisponible_expliquee(qapp):
     assert "horodatage" in panel.view._message
 
 
-def test_les_sources_absentes_sont_grisees(qapp):
+def test_les_sources_absentes_sont_signalees(qapp):
+    """Le manque est expliqué en infobulle, la case reste utilisable."""
     panel = ProfilePanel()
     panel.set_points(DESSINEE, "Dessinée")
 
-    assert panel.checks[SOURCE_ELE_FICHIER].isEnabled() is False
-    assert panel.checks[SOURCE_VITESSE].isEnabled() is False
     assert "horodatage" in panel.checks[SOURCE_VITESSE].toolTip()
+    assert "altitude" in panel.checks[SOURCE_ELE_FICHIER].toolTip().lower()
 
     panel.set_points(AVEC_TOUT, "Complète")
-    assert panel.checks[SOURCE_ELE_FICHIER].isEnabled() is True
-    assert panel.checks[SOURCE_VITESSE].isEnabled() is True
+    assert panel.checks[SOURCE_ELE_FICHIER].toolTip() == ""
+    assert panel.checks[SOURCE_VITESSE].toolTip() == ""
+
+
+def test_une_case_reste_decochable_sans_donnee(qapp):
+    """Régression : une case grisée alors qu'elle était cochée restait bloquée.
+
+    En passant d'une trace pourvue d'altitude IGN à une trace qui n'en a pas,
+    la case restait cochée et grisée, donc impossible à décocher.
+    """
+    panel = ProfilePanel()
+    panel.set_points(AVEC_TOUT, "Complète")
+    panel.set_sources([SOURCE_ELE_FICHIER, SOURCE_ELE_SERVICE])
+
+    panel.set_points(DESSINEE, "Sans altitude IGN")
+
+    assert panel.checks[SOURCE_ELE_SERVICE].isChecked() is True
+    assert panel.checks[SOURCE_ELE_SERVICE].isEnabled() is True
+
+    panel.checks[SOURCE_ELE_SERVICE].setChecked(False)
+    assert SOURCE_ELE_SERVICE not in panel.active_sources
 
 
 def test_panneau_vide(qapp):

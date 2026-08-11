@@ -261,6 +261,7 @@ class TreePanel(QWidget):
     tracks_removed = pyqtSignal(list)
     reverse_requested = pyqtSignal(int)
     elevation_requested = pyqtSignal(int)
+    decimate_requested = pyqtSignal(int)
 
     def __init__(
         self,
@@ -337,8 +338,8 @@ class TreePanel(QWidget):
             self._populate(item, folder.id)
 
         for track in self.db.list_tracks(folder_id):
-            label = f"{track.name}  ({track.point_count} pts)"
-            item = QTreeWidgetItem(parent_item, [label])
+            item = QTreeWidgetItem(parent_item, [track.name])
+            item.setToolTip(COL_NAME, f"{track.name} — {track.point_count} points")
             item.setData(COL_BULB, ROLE_KIND, KIND_TRACK)
             item.setData(COL_BULB, ROLE_ID, track.id)
             item.setForeground(COL_NAME, QColor(track.color))
@@ -506,6 +507,10 @@ class TreePanel(QWidget):
             menu.addAction(
                 "Calculer l'altitude (IGN)",
                 lambda: self._emit_for_track(self.elevation_requested),
+            )
+            menu.addAction(
+                "Décimer la trace…",
+                lambda: self._emit_for_track(self.decimate_requested),
             )
             menu.addAction(
                 "Dupliquer la trace",

@@ -675,7 +675,7 @@ def test_duplication_d_une_trace(window):
     copie = window.duplicate_track(track_id)
 
     assert copie is not None
-    assert window.db.get_track(copie).name == "Rallye V1 (copie)"
+    assert window.db.get_track(copie).name == "Rallye V1-copie"
     assert window.db.count_points(copie) == 4
     assert window.db.get_track(track_id) is not None  # l'original reste
 

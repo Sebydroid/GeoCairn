@@ -1,6 +1,6 @@
 """Carto - Logiciel de gestion de traces GPX."""
 
 APP_NAME = "Carto"
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.1"
 
 __all__ = ["APP_NAME", "APP_VERSION"]

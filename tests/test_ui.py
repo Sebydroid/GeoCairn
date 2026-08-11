@@ -146,11 +146,11 @@ def test_arborescence_reflete_la_base(qapp, db, sample_points):
 
     assert panel.tree.topLevelItemCount() == 1
     labels = [root.child(i).text(COL_NAME) for i in range(root.childCount())]
-    assert labels == ["Alpes", "Trace racine  (4 pts)"]
+    assert labels == ["Alpes", "Trace racine"]
 
     alpes = root.child(0)
     assert alpes.child(0).text(COL_NAME) == "2026"
-    assert alpes.child(0).child(0).text(COL_NAME) == "Trace du col  (4 pts)"
+    assert alpes.child(0).child(0).text(COL_NAME) == "Trace du col"
 
 
 def test_arborescence_sans_doublons_apres_rafraichissements(qapp, db, sample_points):

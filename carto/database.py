@@ -14,6 +14,7 @@ from .models import (
     Point,
     Track,
 )
+from .simplify import simplify_to
 
 SCHEMA_VERSION = 4
 
@@ -61,6 +62,23 @@ CREATE TABLE IF NOT EXISTS points (
     PRIMARY KEY (track_id, seq)
 ) WITHOUT ROWID;
 """
+
+
+#: Suffixe des copies, pour qu'on ne confonde pas l'original et son double.
+SUFFIXE_COPIE = "-copie"
+
+#: Suffixe des traces décimées.
+SUFFIXE_DECIME = "-décimé"
+
+
+def _nom_libre(base: str, pris: set[str]) -> str:
+    """`base` si elle est libre, sinon « base 2 », « base 3 »…"""
+    if base not in pris:
+        return base
+    rang = 2
+    while f"{base} {rang}" in pris:
+        rang += 1
+    return f"{base} {rang}"
 
 
 class DuplicateNameError(ValueError):
@@ -408,13 +426,15 @@ class Database:
 
     def unique_folder_name(self, parent_id: int | None, base: str) -> str:
         """Nom libre dans ce dossier, en suffixant si besoin."""
-        pris = {f.name for f in self.list_folders(parent_id)}
-        if base not in pris:
-            return base
-        rang = 2
-        while f"{base} ({rang})" in pris:
-            rang += 1
-        return f"{base} ({rang})"
+        return _nom_libre(base, {f.name for f in self.list_folders(parent_id)})
+
+    def copy_track_name(self, track_id: int, folder_id: int | None) -> str:
+        """Nom de la copie d'une trace : « Nom-copie », puis « Nom-copie 2 »."""
+        track = self.get_track(track_id)
+        if track is None:
+            raise NotFoundError(f"Trace {track_id} introuvable.")
+        pris = {t.name for t in self.list_tracks(folder_id)}
+        return _nom_libre(f"{track.name}{SUFFIXE_COPIE}", pris)
 
     def copy_folder(
         self, folder_id: int, parent_id: int | None, name: str | None = None
@@ -459,9 +479,38 @@ class Database:
         if track is None:
             raise NotFoundError(f"Trace {track_id} introuvable.")
         return self.create_track(
-            name if name is not None else f"{track.name} (copie)",
+            name
+            if name is not None
+            else self.copy_track_name(track_id, track.folder_id),
             folder_id=track.folder_id,
             points=track.points,
+            color=track.color,
+            opacity=track.opacity,
+            description=track.description,
+            is_loop=track.is_loop,
+        )
+
+    def decimate_track(self, track_id: int, cible: int) -> int | None:
+        """Crée une copie allégée d'une trace, ramenée à environ `cible` points.
+
+        L'original n'est pas touché. Retourne l'identifiant de la copie, ou None
+        si la trace est déjà plus courte que demandé.
+        """
+        track = self.get_track(track_id, with_points=True)
+        if track is None:
+            raise NotFoundError(f"Trace {track_id} introuvable.")
+        if cible >= len(track.points):
+            return None
+
+        allegee = simplify_to(track.points, cible)
+        nom = _nom_libre(
+            f"{track.name}{SUFFIXE_DECIME}",
+            {t.name for t in self.list_tracks(track.folder_id)},
+        )
+        return self.create_track(
+            nom,
+            folder_id=track.folder_id,
+            points=allegee,
             color=track.color,
             opacity=track.opacity,
             description=track.description,

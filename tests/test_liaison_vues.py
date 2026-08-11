@@ -413,7 +413,7 @@ def test_coller_un_dossier_a_cote_de_lui_meme_le_renomme(window):
     assert panel.paste() == 1
 
     noms = sorted(f.name for f in window.db.list_folders(None))
-    assert noms == ["Source", "Source (2)"]
+    assert noms == ["Source", "Source 2"]
 
 
 def test_coller_sans_rien_dans_le_presse_papiers(window):

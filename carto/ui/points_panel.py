@@ -39,6 +39,7 @@ class PointsPanel(QWidget):
     """Liste des points du brouillon, avec suppression et découpage."""
 
     point_selected = pyqtSignal(int)
+    points_selected = pyqtSignal(list)
     delete_requested = pyqtSignal(list)
     split_requested = pyqtSignal(int)
 
@@ -171,6 +172,8 @@ class PointsPanel(QWidget):
         self._silencieux = None
         if len(indexes) == 1:
             self.point_selected.emit(indexes[0])
+        elif indexes:
+            self.points_selected.emit(indexes)
 
     def _update_buttons(self) -> None:
         indexes = self.selected_indexes()

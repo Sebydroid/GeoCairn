@@ -33,10 +33,11 @@ from ..gpx import (
     safe_filename,
     write_gpx,
 )
-from .map_view import MapView
 from .elevation_fetcher import ElevationFetcher
+from .map_view import MapView
 from .points_panel import PointsPanel
 from .profile_panel import SOURCE_ELE_SERVICE, ProfilePanel
+from .toolbar_icons import toolbar_icon
 from .tree_panel import KIND_ROOT, KIND_TRACK, TreePanel, track_ids_under
 
 
@@ -123,12 +124,14 @@ class MainWindow(QMainWindow):
         self.elevation_fetcher.suspended.connect(self.status_label.setText)
 
         self.points_panel.point_selected.connect(self.select_point)
+        self.points_panel.points_selected.connect(self.select_points)
         self.points_panel.delete_requested.connect(self.remove_draft_points)
         self.points_panel.split_requested.connect(self.split_draft)
 
         self.tree_panel.selection_changed.connect(self._on_tree_selection)
         self.tree_panel.reverse_requested.connect(self.reverse_track)
         self.tree_panel.elevation_requested.connect(self.fetch_elevations_for)
+        self.tree_panel.decimate_requested.connect(self.decimate_track)
         self.profile_panel.point_clicked.connect(self.select_point)
 
         self._update_draft_actions()
@@ -139,11 +142,7 @@ class MainWindow(QMainWindow):
         style = self.style()
 
         self.action_create = QAction("Créer une trace", self)
-        # Même icône que les traces dans l'arborescence ; le dossier est
-        # réservé à l'action « Nouveau dossier ».
-        self.action_create.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
-        )
+        self.action_create.setIcon(toolbar_icon("creer"))
         self.action_create.setCheckable(True)
         self.action_create.setShortcut("Ctrl+N")
         self.action_create.setToolTip(
@@ -152,9 +151,7 @@ class MainWindow(QMainWindow):
         self.action_create.toggled.connect(self.set_edit_mode)
 
         self.action_undo = QAction("Annuler le dernier point", self)
-        self.action_undo.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_ArrowBack)
-        )
+        self.action_undo.setIcon(toolbar_icon("annuler"))
         self.action_undo.setShortcut(QKeySequence.StandardKey.Undo)
         # Le QWebEngineView capte le clavier : sans ce contexte, Ctrl+Z ne
         # remonterait pas jusqu'à la fenêtre.
@@ -164,9 +161,7 @@ class MainWindow(QMainWindow):
         self.action_undo.triggered.connect(self.undo_last_point)
 
         self.action_save = QAction("Enregistrer la trace", self)
-        self.action_save.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
-        )
+        self.action_save.setIcon(toolbar_icon("enregistrer"))
         self.action_save.setShortcut(QKeySequence.StandardKey.Save)
         self.action_save.setShortcutContext(
             Qt.ShortcutContext.ApplicationShortcut
@@ -177,35 +172,27 @@ class MainWindow(QMainWindow):
         self.action_save.triggered.connect(lambda: self.save_draft())
 
         self.action_clear = QAction("Effacer le brouillon", self)
-        self.action_clear.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_DialogDiscardButton)
-        )
+        self.action_clear.setIcon(toolbar_icon("effacer"))
         # triggered() transmet un booléen « checked » : sans lambda, il serait
         # reçu comme `confirm` et sauterait la demande de confirmation.
         self.action_clear.triggered.connect(lambda: self.clear_draft())
 
         self.action_resume = QAction("Modifier la trace", self)
-        self.action_resume.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView)
-        )
+        self.action_resume.setIcon(toolbar_icon("modifier"))
         self.action_resume.setToolTip(
             "Reprendre la trace sélectionnée pour la prolonger ou la corriger"
         )
         self.action_resume.triggered.connect(self._resume_selected_track)
 
         self.action_close_loop = QAction("Fermer la boucle", self)
-        self.action_close_loop.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_BrowserReload)
-        )
+        self.action_close_loop.setIcon(toolbar_icon("boucle"))
         self.action_close_loop.setToolTip(
             "Ramener le tracé à son point de départ"
         )
         self.action_close_loop.triggered.connect(lambda: self.close_draft_loop())
 
         self.action_import = QAction("Importer un GPX", self)
-        self.action_import.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_DialogOpenButton)
-        )
+        self.action_import.setIcon(toolbar_icon("import"))
         self.action_import.setShortcut("Ctrl+I")
         self.action_import.setToolTip(
             "Importer un ou plusieurs fichiers GPX dans le dossier sélectionné"
@@ -213,9 +200,7 @@ class MainWindow(QMainWindow):
         self.action_import.triggered.connect(lambda: self.import_gpx())
 
         self.action_export = QAction("Exporter en GPX", self)
-        self.action_export.setIcon(
-            style.standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton)
-        )
+        self.action_export.setIcon(toolbar_icon("export"))
         self.action_export.setToolTip(
             "Exporter la trace sélectionnée dans un fichier GPX"
         )
@@ -240,18 +225,19 @@ class MainWindow(QMainWindow):
         )
         self.addToolBar(toolbar)
 
-        # Import et export en tête ; le choix du fond de carte et la création
-        # de dossier ont été retirés d'ici : ils existent déjà, l'un dans le
-        # sélecteur de couches de la carte, l'autre au clic droit.
+        # Trois groupes, dans l'ordre où l'on s'en sert : les échanges avec
+        # l'extérieur, l'entrée en édition, puis les gestes d'édition.
         toolbar.addAction(self.action_import)
         toolbar.addAction(self.action_export)
         toolbar.addSeparator()
         toolbar.addAction(self.action_create)
         toolbar.addAction(self.action_resume)
+        toolbar.addSeparator()
         toolbar.addAction(self.action_undo)
         toolbar.addAction(self.action_close_loop)
-        toolbar.addAction(self.action_save)
         toolbar.addAction(self.action_clear)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_save)
 
     def _build_menu(self) -> None:
         menu = self.menuBar()
@@ -504,6 +490,25 @@ class MainWindow(QMainWindow):
         self.profile_panel.select_index(index)
         return self.focus_point(index)
 
+    def select_points(self, indexes) -> int:
+        """Désigne plusieurs points à la fois dans les trois vues."""
+        points = self.displayed_points()
+        retenus = [i for i in indexes if 0 <= i < len(points)]
+        self.profile_panel.select_indexes(retenus)
+
+        if self.draft.is_empty:
+            self.map_view.focus_points(
+                [(points[i].lat, points[i].lon) for i in retenus]
+            )
+        else:
+            self.map_view.select_draft_points(retenus)
+
+        if retenus:
+            self.status_label.setText(
+                f"{len(retenus)} points sélectionnés sur {len(points)}."
+            )
+        return len(retenus)
+
     def _refresh_profile(self) -> None:
         """Met le profil en phase avec la trace en cours d'édition."""
         if self.draft.is_empty:
@@ -731,6 +736,54 @@ class MainWindow(QMainWindow):
                 f"{len(track.points)}."
             )
         return renseignes
+
+    def decimate_track(self, track_id: int, cible: int | None = None) -> int | None:
+        """Crée une copie allégée d'une trace trop dense.
+
+        `cible` sert aux tests ; sans elle, le nombre de points est demandé.
+        """
+        track = self.db.get_track(track_id)
+        if track is None:
+            return None
+        if track.point_count < 3:
+            QMessageBox.information(
+                self,
+                "Décimation impossible",
+                "Cette trace compte trop peu de points pour être allégée.",
+            )
+            return None
+
+        if cible is None:
+            propose = max(2, track.point_count // 4)
+            cible, accepte = QInputDialog.getInt(
+                self,
+                f"Décimer « {track.name} »",
+                f"Cette trace compte {track.point_count} points.\n"
+                "Nombre de points souhaité (le résultat sera approchant) :",
+                propose,
+                2,
+                track.point_count - 1,
+                10,
+            )
+            if not accepte:
+                return None
+
+        copie = self.db.decimate_track(track_id, cible)
+        if copie is None:
+            self.status_label.setText(
+                "La trace compte déjà moins de points que demandé."
+            )
+            return None
+
+        obtenu = self.db.get_track(copie)
+        self.tree_panel.refresh()
+        self.tree_panel.select_track(copie)
+        self.display_track(copie)
+        self.status_label.setText(
+            f"« {track.name} » décimée : {track.point_count} points ramenés à "
+            f"{obtenu.point_count} dans « {obtenu.name} »."
+        )
+        return copie
 
     def duplicate_track(self, track_id: int, name: str | None = None) -> int | None:
         """Duplique une trace de la bibliothèque."""

@@ -38,6 +38,8 @@ pytest tests/
 | `carto/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
 | `carto/ui/points_panel.py` | Liste des points de la trace en cours d'édition |
 | `carto/ui/icons.py` | Ampoules d'affichage, dessinées à la volée |
+| `carto/ui/toolbar_icons.py` | Icônes de la barre d'outils, dessinées à la volée |
+| `carto/simplify.py` | Décimation d'une trace (Ramer-Douglas-Peucker) |
 | `carto/ui/profile_panel.py` | Profil sous la carte : altitude ou vitesse |
 | `carto/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
 | `carto/elevation.py` | Altitude des points par le service IGN |
@@ -232,11 +234,16 @@ Sous le tracé, les chiffres clés : **distance totale**, **dénivelés cumulés
 positif et négatif**, **vitesse maximale** et **vitesse moyenne**. Cette
 dernière rapporte la distance au temps total : les arrêts comptent.
 
+La **molette** zoome sur l'axe des distances, autour du curseur ; l'échelle
+verticale s'ajuste à la portion visible. Un **double-clic** revient à la vue
+d'ensemble.
+
 ### Les trois vues sont liées
 
-Carte, liste des points et profil désignent toujours le même point. Sélectionner
-un point dans l'une le met en évidence dans les deux autres, et la carte se
-centre dessus — en édition comme en consultation.
+Carte, liste des points et profil désignent toujours les mêmes points.
+Sélectionner dans l'une met en évidence dans les deux autres, et la carte se
+centre dessus — en édition comme en consultation. La sélection multiple dans la
+liste (Ctrl ou Maj) se répercute elle aussi sur la carte et sur le profil.
 - **Fermer la boucle** ramène le tracé à son point de départ.
 - **Découper ici** coupe la trace en deux au point sélectionné. Le point de
   coupure appartient aux deux moitiés, qui restent donc jointives. La seconde
@@ -248,7 +255,20 @@ centre dessus — en édition comme en consultation.
 
 **Fusionner avec…** (clic droit) ajoute une autre trace à la suite de celle
 sélectionnée ; les deux traces d'origine sont remplacées par la fusion.
-**Dupliquer la trace** en crée une copie indépendante, dans le même dossier.
+**Dupliquer la trace** en crée une copie indépendante dans le même dossier,
+suffixée `-copie` pour qu'on ne la confonde pas avec l'originale.
+
+### Alléger une trace trop dense
+
+Un enregistreur GPS pose un point par seconde : une sortie de trois heures en
+compte des milliers, difficiles à retoucher. **Décimer la trace…** (clic droit)
+rappelle le nombre de points actuel et demande combien en garder, puis crée une
+copie allégée suffixée `-décimé`. L'originale n'est pas touchée.
+
+Le tri n'est pas fait au hasard ni un point sur deux : l'algorithme de
+Ramer-Douglas-Peucker écarte les points qui s'écartent peu de la ligne joignant
+leurs voisins. Les longues lignes droites fondent, les virages restent. Le
+compte obtenu est donc **approchant** et non exact.
 
 ### Importer et exporter
 

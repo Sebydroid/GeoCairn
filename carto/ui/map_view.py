@@ -199,6 +199,16 @@ class MapView(QWebEngineView):
         """Désigne un point d'une trace consultée et centre la carte dessus."""
         self.run_js(f"carto.focusPoint({lat!r}, {lon!r});")
 
+    def focus_points(self, coords) -> None:
+        """Désigne plusieurs points d'une trace consultée."""
+        valeurs = json.dumps([[lat, lon] for lat, lon in coords])
+        self.run_js(f"carto.focusPoints({valeurs});")
+
+    def select_draft_points(self, indexes) -> None:
+        """Met plusieurs points du brouillon en évidence."""
+        valeurs = json.dumps([int(i) for i in indexes])
+        self.run_js(f"carto.selectPoints({valeurs});")
+
     def clear_focus(self) -> None:
         self.run_js("carto.clearFocus();")
 

@@ -154,7 +154,7 @@ def test_renommage_de_trace(panel, db, sample_points):
 
     assert panel.rename_selected("Boucle du lac") is True
     assert db.get_track(track_id).name == "Boucle du lac"
-    assert item_labels(panel) == ["Boucle du lac  (4 pts)"]
+    assert item_labels(panel) == ["Boucle du lac"]
 
 
 # ------------------------------------------------------- glisser-déposer
@@ -181,7 +181,7 @@ def test_deplacement_de_trace_vers_un_dossier(panel, db, sample_points):
     assert db.get_track(track_id).folder_id == folder_id
     assert item_labels(panel) == ["Alpes"]
     parent_item = panel.find_item(KIND_FOLDER, folder_id)
-    assert item_labels(panel, parent_item) == ["Trace  (4 pts)"]
+    assert item_labels(panel, parent_item) == ["Trace"]
 
 
 def test_deplacement_vers_la_racine(panel, db, sample_points):
@@ -245,7 +245,7 @@ def test_element_visible_a_sa_nouvelle_place_apres_depot(panel, db, sample_point
     assert item is not None, "la trace a disparu de l'arborescence"
     assert folder_of(item) == folder_id
     assert item_labels(panel, panel.find_item(KIND_FOLDER, folder_id)) == [
-        "Trace  (4 pts)"
+        "Trace"
     ]
 
 
@@ -465,7 +465,7 @@ def test_trace_enregistree_apparait_et_est_selectionnee(window):
 
     track_id = window.save_draft("Ma trace")
 
-    assert item_labels(window.tree_panel) == ["Ma trace  (2 pts)"]
+    assert item_labels(window.tree_panel) == ["Ma trace"]
     assert window.tree_panel.current_selection() == (KIND_TRACK, track_id)
 
 

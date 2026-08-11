@@ -244,7 +244,7 @@ def test_duplication_d_une_trace(db, sample_points):
 
     assert copie != original
     track = db.get_track(copie, with_points=True)
-    assert track.name == "Rallye V1 (copie)"
+    assert track.name == "Rallye V1-copie"
     assert track.folder_id == folder
     assert [p.as_tuple() for p in track.points] == [
         p.as_tuple() for p in sample_points

@@ -76,8 +76,10 @@ class ProfileView(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setMinimumHeight(110)
+        # Expanding en hauteur : tout l'espace gagné en agrandissant le panneau
+        # doit aller au tracé, pas aux étiquettes qui l'entourent.
         self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self.setMouseTracking(True)
 
@@ -86,17 +88,26 @@ class ProfileView(QWidget):
         self._series: list[dict] = []
         self._message = "Aucune trace sélectionnée"
         self._survol: int | None = None
-        self._selection: int | None = None
+        self._selection: list[int] = []
+        #: Fenêtre visible en abscisse, en fraction de la distance totale.
+        self._vue = (0.0, 1.0)
 
     # -------------------------------------------------------------- contenu
 
     def set_series(self, points, series: list[dict], message: str = "") -> None:
         """`series` : liste de {cle, libelle, unite, couleur, valeurs}."""
+        change = [p.as_tuple() for p in points] != [
+            p.as_tuple() for p in self._points
+        ]
         self._points = list(points)
         self._distances = cumulative_distances(self._points)
         self._series = [s for s in series if self._exploitable(s)]
         self._message = message
         self._survol = None
+        if change:
+            # Changer de trace remet la vue à plat ; cocher une grandeur non.
+            self._selection = []
+            self._vue = (0.0, 1.0)
         self.update()
 
     @staticmethod
@@ -106,14 +117,62 @@ class ProfileView(QWidget):
     def clear(self, message: str = "Aucune trace sélectionnée") -> None:
         self.set_series([], [], message)
 
-    def set_selected(self, index: int | None) -> None:
-        """Met un point en évidence, désigné depuis la liste ou la carte."""
-        self._selection = index
+    def set_selected(self, indexes) -> None:
+        """Met un ou plusieurs points en évidence, désignés par une autre vue."""
+        if indexes is None:
+            self._selection = []
+        elif isinstance(indexes, int):
+            self._selection = [indexes]
+        else:
+            self._selection = list(indexes)
         self.update()
 
     @property
     def selected(self) -> int | None:
-        return self._selection
+        """Point désigné, ou le premier d'une sélection multiple."""
+        return self._selection[0] if self._selection else None
+
+    @property
+    def selected_indexes(self) -> list[int]:
+        return list(self._selection)
+
+    # ---------------------------------------------------------------- zoom
+
+    def zoom(self, facteur: float, ancre: float = 0.5) -> None:
+        """Resserre ou élargit la vue en abscisse autour d'une fraction donnée."""
+        debut, fin = self._vue
+        largeur = (fin - debut) / facteur
+        # En deçà, on lirait moins d'un millième de la trace.
+        largeur = max(0.001, min(1.0, largeur))
+        position = debut + (fin - debut) * ancre
+
+        debut = position - largeur * ancre
+        fin = debut + largeur
+        if debut < 0:
+            debut, fin = 0.0, largeur
+        if fin > 1:
+            debut, fin = 1.0 - largeur, 1.0
+        self._vue = (debut, fin)
+        self.update()
+
+    def reset_zoom(self) -> None:
+        self._vue = (0.0, 1.0)
+        self.update()
+
+    @property
+    def view_range(self) -> tuple[float, float]:
+        return self._vue
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        if not self.has_data:
+            return
+        zone = self._plot_rect()
+        ancre = (event.position().x() - zone.left()) / zone.width()
+        ancre = max(0.0, min(1.0, ancre))
+        self.zoom(1.25 if event.angleDelta().y() > 0 else 1 / 1.25, ancre)
+
+    def mouseDoubleClickEvent(self, event) -> None:  # noqa: N802
+        self.reset_zoom()
 
     @property
     def has_data(self) -> bool:
@@ -139,14 +198,33 @@ class ProfileView(QWidget):
             max(1, self.height() - MARGE_HAUTE - MARGE_BASSE),
         )
 
+    def _fraction(self, index: int) -> float:
+        """Position du point le long de la trace, entre 0 et 1."""
+        total = self._distances[-1] or 1.0
+        return self._distances[index] / total
+
+    def visible_indexes(self) -> list[int]:
+        """Indices compris dans la fenêtre de zoom, avec un point de marge."""
+        debut, fin = self._vue
+        dedans = [
+            i for i in range(len(self._distances))
+            if debut <= self._fraction(i) <= fin
+        ]
+        if not dedans:
+            return list(range(len(self._distances)))
+        premier = max(0, dedans[0] - 1)
+        dernier = min(len(self._distances) - 1, dedans[-1] + 1)
+        return list(range(premier, dernier + 1))
+
     def _bornes(self, unite: str) -> tuple[float, float]:
-        """Échelle commune à toutes les séries d'une même unité."""
+        """Échelle commune aux séries d'une même unité, sur la partie visible."""
+        visibles = set(self.visible_indexes())
         connues = [
             v
             for serie in self._series
             if serie["unite"] == unite
-            for v in serie["valeurs"]
-            if v is not None
+            for i, v in enumerate(serie["valeurs"])
+            if v is not None and i in visibles
         ]
         if not connues:
             return (0.0, 1.0)
@@ -157,25 +235,31 @@ class ProfileView(QWidget):
         return (bas - marge, haut + marge)
 
     def index_at(self, x: float) -> int | None:
-        """Indice du point sous une abscisse écran."""
+        """Indice du point sous une abscisse écran, zoom compris."""
         if not self._distances or self._distances[-1] <= 0:
             return None
         zone = self._plot_rect()
+        debut, fin = self._vue
         ratio = max(0.0, min(1.0, (x - zone.left()) / zone.width()))
-        cible = ratio * self._distances[-1]
+        cible = (debut + (fin - debut) * ratio) * self._distances[-1]
         meilleur, ecart = 0, float("inf")
         for i, d in enumerate(self._distances):
             if abs(d - cible) < ecart:
                 meilleur, ecart = i, abs(d - cible)
         return meilleur
 
+    def _abscisse(self, index: int) -> float:
+        zone = self._plot_rect()
+        debut, fin = self._vue
+        return zone.left() + zone.width() * (
+            (self._fraction(index) - debut) / (fin - debut)
+        )
+
     def _position(self, index: int, valeur: float, bornes) -> QPointF:
         zone = self._plot_rect()
         bas, haut = bornes
-        total = self._distances[-1] or 1.0
-        x = zone.left() + zone.width() * (self._distances[index] / total)
         y = zone.bottom() - zone.height() * ((valeur - bas) / (haut - bas))
-        return QPointF(x, y)
+        return QPointF(self._abscisse(index), y)
 
     # --------------------------------------------------------------- dessin
 
@@ -209,26 +293,36 @@ class ProfileView(QWidget):
         painter.end()
 
     def _draw_selection(self, painter, zone, bornes) -> None:
-        """Repère du point désigné depuis une autre vue."""
-        if self._selection is None or not 0 <= self._selection < len(self._distances):
+        """Repères des points désignés depuis une autre vue."""
+        if not self._selection:
             return
-        total = self._distances[-1] or 1.0
-        x = zone.left() + zone.width() * (self._distances[self._selection] / total)
+        painter.save()
+        painter.setClipRect(zone)
+        multiple = len(self._selection) > 1
 
-        painter.setPen(QPen(QColor("#b8860b"), 2))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawLine(int(x), int(zone.top()), int(x), int(zone.bottom()))
-
-        for serie in self._series:
-            valeur = serie["valeurs"][self._selection]
-            if valeur is None:
+        for index in self._selection:
+            if not 0 <= index < len(self._distances):
                 continue
-            position = self._position(
-                self._selection, valeur, bornes[serie["unite"]]
-            )
-            painter.setBrush(QBrush(QColor("#ffd700")))
-            painter.setPen(QPen(QColor("#b8860b"), 2))
-            painter.drawEllipse(position, 5, 5)
+            x = self._abscisse(index)
+            if not zone.left() - 2 <= x <= zone.right() + 2:
+                continue
+
+            painter.setPen(QPen(QColor("#b8860b"), 1 if multiple else 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawLine(int(x), int(zone.top()), int(x), int(zone.bottom()))
+
+            for serie in self._series:
+                valeur = serie["valeurs"][index]
+                if valeur is None:
+                    continue
+                painter.setBrush(QBrush(QColor("#ffd700")))
+                painter.setPen(QPen(QColor("#b8860b"), 2))
+                painter.drawEllipse(
+                    self._position(index, valeur, bornes[serie["unite"]]),
+                    4 if multiple else 5,
+                    4 if multiple else 5,
+                )
+        painter.restore()
 
     def _draw_axes(self, painter, metrics, zone, unites, bornes) -> None:
         for rang, unite in enumerate(unites[:2]):
@@ -260,19 +354,29 @@ class ProfileView(QWidget):
                     int(zone.right()) + 6, int(MARGE_HAUTE) - 4, unite
                 )
 
-        # Échelle des abscisses : distance parcourue.
+        # Échelle des abscisses : distance parcourue sur la partie visible.
         painter.setPen(QColor("#666666"))
         total = self._distances[-1]
+        debut, fin = self._vue
         for i in range(5):
             x = zone.left() + zone.width() * i / 4
-            texte = format_length(total * i / 4)
+            texte = format_length(total * (debut + (fin - debut) * i / 4))
             largeur = metrics.horizontalAdvance(texte)
             painter.drawText(
                 int(x - largeur / 2), int(zone.bottom()) + metrics.height(), texte
             )
+        if (fin - debut) < 0.999:
+            painter.drawText(
+                int(zone.left()) + 4,
+                int(zone.bottom()) + metrics.height(),
+                f"zoom ×{1 / (fin - debut):.0f}",
+            )
 
     def _draw_series(self, painter, zone, bornes) -> None:
         remplir = len(self._series) == 1
+        # Sous zoom, une partie des points tombe hors du cadre.
+        painter.save()
+        painter.setClipRect(zone)
         for serie in self._series:
             limites = bornes[serie["unite"]]
             couleur = QColor(serie["couleur"])
@@ -304,6 +408,7 @@ class ProfileView(QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(QPen(couleur, 2))
                 painter.drawPolyline(QPolygonF(segment))
+        painter.restore()
 
     def _draw_legend(self, painter, metrics, zone) -> None:
         if len(self._series) < 2:
@@ -322,8 +427,9 @@ class ProfileView(QWidget):
         if self._survol is None or not 0 <= self._survol < len(self._distances):
             return
 
-        total = self._distances[-1] or 1.0
-        x = zone.left() + zone.width() * (self._distances[self._survol] / total)
+        x = self._abscisse(self._survol)
+        if not zone.left() <= x <= zone.right():
+            return
         painter.setPen(QPen(QColor("#b8860b"), 1, Qt.PenStyle.DashLine))
         painter.drawLine(int(x), int(zone.top()), int(x), int(zone.bottom()))
 
@@ -381,6 +487,12 @@ class ProfilePanel(QWidget):
         self._nom = ""
         self.title = ElidedLabel("Profil", self)
         self.stats = ElidedLabel("", self)
+        # Une seule ligne, de hauteur fixe : sans cela le résumé se partageait
+        # la hauteur avec le tracé et en prenait la moitié.
+        self.stats.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed
+        )
+        self.stats.setFixedHeight(self.stats.fontMetrics().height() + 4)
         self.view = ProfileView(self)
 
         self.view.point_clicked.connect(self.point_clicked)
@@ -414,9 +526,17 @@ class ProfilePanel(QWidget):
         """Met un point en évidence sans réémettre : les vues se répondraient."""
         self.view.set_selected(index)
 
+    def select_indexes(self, indexes) -> None:
+        """Met plusieurs points en évidence."""
+        self.view.set_selected(indexes)
+
     @property
     def selected(self) -> int | None:
         return self.view.selected
+
+    @property
+    def selected_indexes(self) -> list[int]:
+        return self.view.selected_indexes
 
     # -------------------------------------------------------------- contenu
 
@@ -454,11 +574,27 @@ class ProfilePanel(QWidget):
         self._refresh()
 
     def _update_availability(self) -> None:
-        """Grise les grandeurs que la trace ne porte pas."""
+        """Signale les grandeurs absentes sans jamais bloquer la case.
+
+        Griser une case cochée la rendait impossible à décocher : c'est ce qui
+        arrivait en passant d'une trace pourvue d'altitude IGN à une trace qui
+        n'en a pas.
+        """
         for cle, case in self.checks.items():
             disponible = source_available(self._points, cle)
-            case.setEnabled(disponible)
-            case.setToolTip("" if disponible else self._message_absence(cle))
+            case.setToolTip(
+                "" if disponible else self._message_absence(cle)
+            )
+            # La case reste cliquable ; seul son libellé s'estompe.
+            couleur = self._couleur(cle) if disponible else "#9aa0a6"
+            case.setStyleSheet(f"QCheckBox {{ color: {couleur}; }}")
+
+    @staticmethod
+    def _couleur(cle: str) -> str:
+        for autre, _libelle, _unite, couleur in SOURCES:
+            if autre == cle:
+                return couleur
+        return "#333333"
 
     def summary(self) -> str:
         """Chiffres clés de la trace : distance, dénivelés, vitesses."""
