@@ -133,10 +133,26 @@ class MapView(QWebEngineView):
 
     def _on_ready(self) -> None:
         self.is_ready = True
+        # La page a pu se charger avant que la disposition ne soit établie.
+        self.run_js("carto.invalidateSize();")
         self.map_ready.emit()
 
     def run_js(self, script: str) -> None:
         self._page.runJavaScript(script)
+
+    def invalidate_size(self) -> None:
+        """Prévient Leaflet que le conteneur a changé de taille.
+
+        Sans cela, la carte garde la taille qu'elle avait au chargement — nulle
+        si le composant n'était pas encore disposé — et le recadrage automatique
+        ne déplace plus rien.
+        """
+        if self.is_ready:
+            self.run_js("carto.invalidateSize();")
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self.invalidate_size()
 
     def set_view(self, lat: float, lon: float, zoom: int | None = None) -> None:
         zoom_arg = "undefined" if zoom is None else str(int(zoom))

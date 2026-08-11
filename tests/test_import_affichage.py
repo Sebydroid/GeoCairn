@@ -203,10 +203,13 @@ def test_la_carte_se_recadre_sur_la_trace(window, tmp_path):
 
     window.display_track(created[0])
 
-    assert wait_for(
-        lambda: run_js_sync(window.map_view, "map.getCenter().lat") > 45.0
-        and run_js_sync(window.map_view, "map.getCenter().lat") < 46.0,
-        timeout_ms=5000,
+    # Un seul aller-retour vers le JavaScript par évaluation : deux appels
+    # observeraient deux instants différents.
+    def centre():
+        return run_js_sync(window.map_view, "map.getCenter().lat")
+
+    assert wait_for(lambda: 45.0 < centre() < 46.0, timeout_ms=10000), (
+        f"centre resté à {centre()}"
     )
 
 

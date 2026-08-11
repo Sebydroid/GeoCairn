@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..editor import DraftTrack
+from ..geo import cumulative_distances, format_length
 from .widgets import ElidedLabel
 
 
@@ -46,7 +47,7 @@ class PointsPanel(QWidget):
 
         self.title = ElidedLabel("Points de la trace", self)
         self.header = ElidedLabel(
-            "   n°       latitude ; longitude      altitude", self
+            "   n°       latitude ; longitude    altitude    distance", self
         )
         self.header.setEnabled(False)
         self.list = QListWidget(self)
@@ -82,6 +83,8 @@ class PointsPanel(QWidget):
 
         self._updating = False
         self._editable = True
+        #: Sélection posée par le programme, à ne pas renvoyer aux autres vues.
+        self._silencieux: list[int] | None = None
         self.refresh(DraftTrack())
 
     # -------------------------------------------------------------- contenu
@@ -113,12 +116,15 @@ class PointsPanel(QWidget):
         selection = self.selected_indexes()
         self._editable = editable
 
+        distances = cumulative_distances(points)
+
         self._updating = True
         self.list.clear()
         for index, point in enumerate(points, start=0):
             self.list.addItem(
                 f"{index + 1:>4}   {point.lat:.5f} ; {point.lon:.5f}"
-                f"   {format_elevation(point.ele, point.ele_service)}"
+                f"   {format_elevation(point.ele, point.ele_service):>8}"
+                f"   {format_length(distances[index]):>9}"
             )
         self._updating = False
 
@@ -128,9 +134,10 @@ class PointsPanel(QWidget):
 
     def _restore_selection(self, indexes: list[int]) -> None:
         self._updating = True
-        for index in indexes:
-            if 0 <= index < self.list.count():
-                self.list.item(index).setSelected(True)
+        retenus = [i for i in indexes if 0 <= i < self.list.count()]
+        for index in retenus:
+            self.list.item(index).setSelected(True)
+        self._silencieux = retenus
         self._updating = False
 
     # ------------------------------------------------------------ sélection
@@ -139,21 +146,29 @@ class PointsPanel(QWidget):
         return sorted(self.list.row(item) for item in self.list.selectedItems())
 
     def select_index(self, index: int) -> None:
-        """Sélectionne un point depuis l'extérieur (clic sur la carte)."""
+        """Sélectionne un point depuis l'extérieur (carte ou profil)."""
         if not 0 <= index < self.list.count():
             return
         self._updating = True
         self.list.clearSelection()
         self.list.setCurrentRow(index)
+        self._silencieux = [index]
         self._updating = False
         self.list.scrollToItem(self.list.item(index))
         self._update_buttons()
 
     def _on_selection_changed(self) -> None:
         self._update_buttons()
-        if self._updating:
-            return
         indexes = self.selected_indexes()
+
+        # Une sélection posée par le programme ne doit pas repartir vers la
+        # carte : Qt émet parfois ce signal en différé, après la retombée du
+        # drapeau, d'où la comparaison sur la valeur elle-même.
+        if self._updating or indexes == self._silencieux:
+            self._silencieux = None
+            return
+
+        self._silencieux = None
         if len(indexes) == 1:
             self.point_selected.emit(indexes[0])
 

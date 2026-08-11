@@ -92,6 +92,56 @@ def has_times(points: Sequence[Point]) -> bool:
     return horodates >= 2
 
 
+def elevation_gain(valeurs: Sequence[float | None]) -> tuple[float, float]:
+    """Dénivelés cumulés positif et négatif, en mètres.
+
+    Les valeurs manquantes sont ignorées : la comparaison se fait entre
+    altitudes connues consécutives.
+    """
+    montee = descente = 0.0
+    precedente = None
+    for valeur in valeurs:
+        if valeur is None:
+            continue
+        if precedente is not None:
+            ecart = valeur - precedente
+            if ecart > 0:
+                montee += ecart
+            else:
+                descente -= ecart
+        precedente = valeur
+    return (montee, descente)
+
+
+def speed_stats(points: Sequence[Point]) -> tuple[float | None, float | None]:
+    """Vitesse maximale et vitesse moyenne, en km/h.
+
+    La moyenne est le rapport de la distance totale au temps écoulé, et non la
+    moyenne des vitesses instantanées : les arrêts comptent.
+    """
+    valeurs = [v for v in speeds(points) if v is not None]
+    if not valeurs:
+        return (None, None)
+
+    maximale = max(valeurs)
+
+    debut = _parse_time(points[0].time)
+    fin = _parse_time(points[-1].time)
+    if debut is None or fin is None:
+        return (maximale, None)
+    secondes = (fin - debut).total_seconds()
+    if secondes <= 0:
+        return (maximale, None)
+    return (maximale, total_length(points) / secondes * 3.6)
+
+
+def format_speed(kmh: float | None) -> str:
+    """Vitesse lisible : « 12,3 km/h », ou « — » si inconnue."""
+    if kmh is None:
+        return "—"
+    return f"{kmh:.1f} km/h".replace(".", ",")
+
+
 def format_length(metres: float) -> str:
     """Longueur lisible : « 850 m » ou « 12,34 km »."""
     if metres < 1000:

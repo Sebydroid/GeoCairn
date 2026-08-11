@@ -18,7 +18,16 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..geo import cumulative_distances, format_length, has_times, speeds
+from ..geo import (
+    cumulative_distances,
+    elevation_gain,
+    format_length,
+    format_speed,
+    has_times,
+    speed_stats,
+    speeds,
+    total_length,
+)
 from ..models import Point
 from .widgets import ElidedLabel
 
@@ -77,6 +86,7 @@ class ProfileView(QWidget):
         self._series: list[dict] = []
         self._message = "Aucune trace sélectionnée"
         self._survol: int | None = None
+        self._selection: int | None = None
 
     # -------------------------------------------------------------- contenu
 
@@ -95,6 +105,15 @@ class ProfileView(QWidget):
 
     def clear(self, message: str = "Aucune trace sélectionnée") -> None:
         self.set_series([], [], message)
+
+    def set_selected(self, index: int | None) -> None:
+        """Met un point en évidence, désigné depuis la liste ou la carte."""
+        self._selection = index
+        self.update()
+
+    @property
+    def selected(self) -> int | None:
+        return self._selection
 
     @property
     def has_data(self) -> bool:
@@ -183,10 +202,33 @@ class ProfileView(QWidget):
 
         self._draw_axes(painter, metrics, zone, unites, bornes)
         self._draw_series(painter, zone, bornes)
+        self._draw_selection(painter, zone, bornes)
         self._draw_legend(painter, metrics, zone)
         self._draw_hover(painter, metrics, zone, bornes)
 
         painter.end()
+
+    def _draw_selection(self, painter, zone, bornes) -> None:
+        """Repère du point désigné depuis une autre vue."""
+        if self._selection is None or not 0 <= self._selection < len(self._distances):
+            return
+        total = self._distances[-1] or 1.0
+        x = zone.left() + zone.width() * (self._distances[self._selection] / total)
+
+        painter.setPen(QPen(QColor("#b8860b"), 2))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawLine(int(x), int(zone.top()), int(x), int(zone.bottom()))
+
+        for serie in self._series:
+            valeur = serie["valeurs"][self._selection]
+            if valeur is None:
+                continue
+            position = self._position(
+                self._selection, valeur, bornes[serie["unite"]]
+            )
+            painter.setBrush(QBrush(QColor("#ffd700")))
+            painter.setPen(QPen(QColor("#b8860b"), 2))
+            painter.drawEllipse(position, 5, 5)
 
     def _draw_axes(self, painter, metrics, zone, unites, bornes) -> None:
         for rang, unite in enumerate(unites[:2]):
@@ -333,13 +375,14 @@ class ProfilePanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
 
-        # Posés avant les cases à cocher : les connecter déclenche _refresh,
-        # qui a besoin de ces attributs.
+        # Tout ce dont _refresh a besoin est posé avant la moindre connexion :
+        # cocher une case déclenche _refresh dès la construction.
         self._points: list[Point] = []
         self._nom = ""
-
         self.title = ElidedLabel("Profil", self)
+        self.stats = ElidedLabel("", self)
         self.view = ProfileView(self)
+
         self.view.point_clicked.connect(self.point_clicked)
 
         entete = QHBoxLayout()
@@ -361,8 +404,19 @@ class ProfilePanel(QWidget):
         layout.setSpacing(2)
         layout.addLayout(entete)
         layout.addWidget(self.view)
+        layout.addWidget(self.stats)
 
         self.set_points([], "")
+
+    # ----------------------------------------------------------- sélection
+
+    def select_index(self, index: int | None) -> None:
+        """Met un point en évidence sans réémettre : les vues se répondraient."""
+        self.view.set_selected(index)
+
+    @property
+    def selected(self) -> int | None:
+        return self.view.selected
 
     # -------------------------------------------------------------- contenu
 
@@ -406,8 +460,36 @@ class ProfilePanel(QWidget):
             case.setEnabled(disponible)
             case.setToolTip("" if disponible else self._message_absence(cle))
 
+    def summary(self) -> str:
+        """Chiffres clés de la trace : distance, dénivelés, vitesses."""
+        if len(self._points) < 2:
+            return ""
+
+        morceaux = [f"Distance : {format_length(total_length(self._points))}"]
+
+        # Dénivelés depuis l'altitude du fichier ; à défaut, celle de l'IGN.
+        for cle, origine in (
+            (SOURCE_ELE_FICHIER, "fichier"),
+            (SOURCE_ELE_SERVICE, "IGN"),
+        ):
+            valeurs = series_for(self._points, cle)
+            if sum(1 for v in valeurs if v is not None) >= 2:
+                montee, descente = elevation_gain(valeurs)
+                morceaux.append(
+                    f"Dénivelé ({origine}) : +{montee:.0f} m / −{descente:.0f} m"
+                )
+                break
+
+        maximale, moyenne = speed_stats(self._points)
+        if maximale is not None:
+            morceaux.append(f"Vitesse max : {format_speed(maximale)}")
+            morceaux.append(f"moyenne : {format_speed(moyenne)}")
+
+        return "     ".join(morceaux)
+
     def _refresh(self, *_args) -> None:
         self.title.setText(f"Profil — {self._nom}" if self._nom else "Profil")
+        self.stats.setText(self.summary())
 
         if not self._points:
             self.view.clear("Sélectionnez une trace pour voir son profil")

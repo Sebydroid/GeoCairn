@@ -101,6 +101,16 @@ class DraftTrack:
         self._points[index] = Point(lat, lon, ancien.ele, ancien.time)
         return True
 
+    def set_service_elevation(self, index: int, altitude: float | None) -> bool:
+        """Renseigne l'altitude calculée d'un point déjà saisi."""
+        if not 0 <= index < len(self._points):
+            return False
+        ancien = self._points[index]
+        self._points[index] = Point(
+            ancien.lat, ancien.lon, ancien.ele, ancien.time, altitude
+        )
+        return True
+
     def remove_point(self, index: int) -> Point | None:
         """Supprime un point précis. Retourne le point supprimé, ou None."""
         if not 0 <= index < len(self._points):

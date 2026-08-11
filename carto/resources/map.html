@@ -335,6 +335,15 @@
         layerNames: function () { return Object.keys(layers); },
         isReady: function () { return true; },
 
+        // À appeler après un changement de taille du conteneur : sans cela
+        // Leaflet garde une taille périmée, et fitBounds ne recadre rien.
+        invalidateSize: function () {
+            map.invalidateSize();
+            return [map.getSize().x, map.getSize().y];
+        },
+
+        mapSize: function () { return [map.getSize().x, map.getSize().y]; },
+
         // -- brouillon ------------------------------------------------------
         setEditMode: function (on) {
             draft.editing = !!on;

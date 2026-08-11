@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QKeySequence
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QColorDialog,
@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..database import CycleError, Database, DuplicateNameError
+from ..database import CycleError, Database, DuplicateNameError, NotFoundError
 from .icons import (
     BULB_OFF,
     BULB_ON,
@@ -104,10 +104,13 @@ class _TreeWidget(QTreeWidget):
     après notre reconstruction — l'élément déplacé disparaîtrait de l'affichage.
     """
 
-    item_dropped = pyqtSignal(str, int, object)
+    items_dropped = pyqtSignal(list, object)
     bulb_clicked = pyqtSignal(object)
     rename_shortcut = pyqtSignal()
     delete_shortcut = pyqtSignal()
+    copy_shortcut = pyqtSignal()
+    cut_shortcut = pyqtSignal()
+    paste_shortcut = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -148,6 +151,15 @@ class _TreeWidget(QTreeWidget):
         if event.key() == Qt.Key.Key_Delete:
             self.delete_shortcut.emit()
             return
+        if event.matches(QKeySequence.StandardKey.Copy):
+            self.copy_shortcut.emit()
+            return
+        if event.matches(QKeySequence.StandardKey.Cut):
+            self.cut_shortcut.emit()
+            return
+        if event.matches(QKeySequence.StandardKey.Paste):
+            self.paste_shortcut.emit()
+            return
         super().keyPressEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -164,34 +176,51 @@ class _TreeWidget(QTreeWidget):
             return
         super().mousePressEvent(event)
 
-    def _dragged_item(self) -> QTreeWidgetItem | None:
-        item = self.currentItem()
-        if item is None or item.data(COL_BULB, ROLE_KIND) not in (
-            KIND_TRACK, KIND_FOLDER
-        ):
-            return None
-        return item
+    def dragged_items(self) -> list[QTreeWidgetItem]:
+        """Éléments emportés par le glisser : toute la sélection.
 
-    def _drop_is_allowed(self, dragged: QTreeWidgetItem | None, target) -> bool:
-        if dragged is None:
+        Un élément dont un ancêtre est lui aussi sélectionné est écarté : le
+        déplacer séparément le sortirait du dossier qui l'emmène.
+        """
+        selection = [
+            item
+            for item in self.selectedItems()
+            if item.data(COL_BULB, ROLE_KIND) in (KIND_TRACK, KIND_FOLDER)
+        ]
+        courant = self.currentItem()
+        if not selection and courant is not None:
+            if courant.data(COL_BULB, ROLE_KIND) in (KIND_TRACK, KIND_FOLDER):
+                selection = [courant]
+
+        retenus = []
+        for item in selection:
+            parent = item.parent()
+            if not any(is_self_or_descendant(parent, autre) for autre in selection):
+                retenus.append(item)
+        return retenus
+
+    def _drop_is_allowed(self, dragged: list[QTreeWidgetItem], target) -> bool:
+        if not dragged:
             return False
-        if dragged.data(COL_BULB, ROLE_KIND) != KIND_FOLDER:
-            return True
-        # Déposer un dossier dans lui-même ou dans sa propre descendance
-        # ferait disparaître la branche : on refuse dès le survol.
-        return not is_self_or_descendant(target, dragged)
+        for item in dragged:
+            if item.data(COL_BULB, ROLE_KIND) != KIND_FOLDER:
+                continue
+            # Déposer un dossier dans lui-même ou dans sa propre descendance
+            # ferait disparaître la branche : on refuse dès le survol.
+            if is_self_or_descendant(target, item):
+                return False
+        return True
 
     def dragMoveEvent(self, event) -> None:  # noqa: N802
-        dragged = self._dragged_item()
         target = self.itemAt(event.position().toPoint())
-        if not self._drop_is_allowed(dragged, target):
+        if not self._drop_is_allowed(self.dragged_items(), target):
             event.ignore()
             return
         event.setDropAction(Qt.DropAction.MoveAction)
         event.accept()
 
     def dropEvent(self, event) -> None:  # noqa: N802
-        dragged = self._dragged_item()
+        dragged = self.dragged_items()
         target = self.itemAt(event.position().toPoint())
         if not self._drop_is_allowed(dragged, target):
             event.ignore()
@@ -199,15 +228,16 @@ class _TreeWidget(QTreeWidget):
 
         # Destination : le dossier visé, celui qui contient la trace visée, ou
         # la racine si le dépôt a lieu sur « Mes traces » ou dans le vide.
-        kind = dragged.data(COL_BULB, ROLE_KIND)
+        deplaces = [
+            (item.data(COL_BULB, ROLE_KIND), int(item.data(COL_BULB, ROLE_ID)))
+            for item in dragged
+        ]
         destination = folder_of(target)
 
         # IgnoreAction, surtout pas MoveAction : voir la note de classe.
         event.setDropAction(Qt.DropAction.IgnoreAction)
         event.accept()
-        self.item_dropped.emit(
-            kind, int(dragged.data(COL_BULB, ROLE_ID)), destination
-        )
+        self.items_dropped.emit(deplaces, destination)
 
 
 class TreePanel(QWidget):
@@ -260,7 +290,13 @@ class TreePanel(QWidget):
         self.tree.delete_shortcut.connect(lambda: self.delete_selected())
         self.tree.currentItemChanged.connect(self._on_current_changed)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
-        self.tree.item_dropped.connect(self._on_item_dropped)
+        self.tree.items_dropped.connect(self._on_items_dropped)
+        self.tree.copy_shortcut.connect(lambda: self.copy_selection())
+        self.tree.cut_shortcut.connect(self.cut_selection)
+        self.tree.paste_shortcut.connect(self.paste)
+
+        #: Presse-papiers interne : (mode, [(kind, id), ...])
+        self._clipboard: tuple[str, list] = ("copier", [])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -440,6 +476,12 @@ class TreePanel(QWidget):
             )
             menu.addSeparator()
 
+        if kind in (KIND_FOLDER, KIND_TRACK):
+            menu.addAction("Copier\tCtrl+C", lambda: self.copy_selection())
+            menu.addAction("Couper\tCtrl+X", self.cut_selection)
+        if self._clipboard[1]:
+            menu.addAction("Coller\tCtrl+V", self.paste)
+        menu.addSeparator()
         menu.addAction("Nouveau dossier…", lambda: self.create_folder())
 
         if kind == KIND_FOLDER:
@@ -758,11 +800,78 @@ class TreePanel(QWidget):
         )
         return answer == QMessageBox.StandardButton.Yes
 
-    def _on_item_dropped(self, kind: str, ident: int, folder_id: int | None) -> None:
-        if kind == KIND_TRACK:
-            self.move_track(ident, folder_id)
-        elif kind == KIND_FOLDER:
-            self.move_folder(ident, folder_id)
+    def _on_items_dropped(self, elements, folder_id: int | None) -> None:
+        deplaces = self.move_items(elements, folder_id)
+        if deplaces > 1:
+            self.status_message.emit(f"{deplaces} éléments déplacés.")
+
+    def move_items(self, elements, folder_id: int | None) -> int:
+        """Déplace plusieurs traces et dossiers vers un dossier."""
+        deplaces = 0
+        for kind, ident in elements:
+            if kind == KIND_TRACK:
+                deplaces += bool(self.move_track(ident, folder_id))
+            elif kind == KIND_FOLDER:
+                deplaces += bool(self.move_folder(ident, folder_id))
+        return deplaces
+
+    # ------------------------------------------- copier, couper, coller
+
+    def copy_selection(self, couper: bool = False) -> int:
+        """Met la sélection dans le presse-papiers de l'arborescence."""
+        elements = [
+            (item.data(COL_BULB, ROLE_KIND), int(item.data(COL_BULB, ROLE_ID)))
+            for item in self.tree.dragged_items()
+        ]
+        if not elements:
+            return 0
+        self._clipboard = ("couper" if couper else "copier", elements)
+        verbe = "coupé(s)" if couper else "copié(s)"
+        self.status_message.emit(f"{len(elements)} élément(s) {verbe}.")
+        return len(elements)
+
+    def cut_selection(self) -> int:
+        return self.copy_selection(couper=True)
+
+    def paste(self) -> int:
+        """Colle le presse-papiers dans le dossier sélectionné."""
+        if not self._clipboard[1]:
+            self.status_message.emit("Rien à coller.")
+            return 0
+
+        mode, elements = self._clipboard
+        destination = self.current_folder_id()
+
+        if mode == "couper":
+            deplaces = self.move_items(elements, destination)
+            self._clipboard = (mode, [])
+            self.status_message.emit(f"{deplaces} élément(s) déplacé(s).")
+            return deplaces
+
+        colles = 0
+        dernier = None
+        for kind, ident in elements:
+            try:
+                if kind == KIND_TRACK:
+                    track = self.db.get_track(ident)
+                    if track is None:
+                        continue
+                    dernier = (KIND_TRACK, self.db.duplicate_track(
+                        ident, name=track.name
+                    ))
+                    self.db.move_track(dernier[1], destination)
+                else:
+                    dernier = (KIND_FOLDER, self.db.copy_folder(ident, destination))
+                colles += 1
+            except (CycleError, DuplicateNameError, NotFoundError) as exc:
+                QMessageBox.warning(self, "Collage impossible", str(exc))
+
+        if colles:
+            self.refresh()
+            if dernier is not None:
+                self._select(*dernier)
+            self.status_message.emit(f"{colles} élément(s) collé(s).")
+        return colles
 
     def move_folder(self, folder_id: int, parent_id: int | None) -> bool:
         """Déplace un dossier sous un autre parent (glisser-déposer)."""

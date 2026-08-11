@@ -34,6 +34,7 @@ from ..gpx import (
     write_gpx,
 )
 from .map_view import MapView
+from .elevation_fetcher import ElevationFetcher
 from .points_panel import PointsPanel
 from .profile_panel import SOURCE_ELE_SERVICE, ProfilePanel
 from .tree_panel import KIND_ROOT, KIND_TRACK, TreePanel, track_ids_under
@@ -56,6 +57,8 @@ class MainWindow(QMainWindow):
         self.visible_tracks: set[int] = set()
         #: Vrai dès la fermeture : plus aucun accès à la base ne doit avoir lieu.
         self._closing = False
+        #: Altitude demandée à l'IGN au fil de la saisie, en arrière-plan.
+        self.elevation_fetcher = ElevationFetcher(self)
 
         self.tree_panel = TreePanel(self.db, self.visible_tracks, self)
         self.points_panel = PointsPanel(self)
@@ -97,7 +100,7 @@ class MainWindow(QMainWindow):
         self.map_view.undo_requested.connect(self.undo_last_point)
         self.map_view.point_moved.connect(self.move_draft_point)
         self.map_view.point_context.connect(self.show_point_menu)
-        self.map_view.point_selected.connect(self.select_draft_point)
+        self.map_view.point_selected.connect(self.select_point)
         self.map_view.point_inserted.connect(self.insert_draft_point)
 
         self.tree_panel.export_requested.connect(self.export_track)
@@ -115,7 +118,11 @@ class MainWindow(QMainWindow):
         self.tree_panel.style_changed.connect(self.refresh_track_style)
         self.tree_panel.tracks_removed.connect(self.forget_tracks)
 
-        self.points_panel.point_selected.connect(self.focus_point)
+        self.elevation_fetcher.resolved.connect(self._on_elevations_resolved)
+        self.elevation_fetcher.failed.connect(self._on_elevation_failed)
+        self.elevation_fetcher.suspended.connect(self.status_label.setText)
+
+        self.points_panel.point_selected.connect(self.select_point)
         self.points_panel.delete_requested.connect(self.remove_draft_points)
         self.points_panel.split_requested.connect(self.split_draft)
 
@@ -313,6 +320,7 @@ class MainWindow(QMainWindow):
         self.map_view.append_draft_point(lat, lon)
         self.status_label.setText(f"Point ajouté : {lat:.5f} ; {lon:.5f}")
         self._update_draft_actions()
+        self._request_elevation(len(self.draft) - 1)
 
     def undo_last_point(self) -> None:
         """Retire le dernier point ajouté (Ctrl+Z)."""
@@ -487,8 +495,13 @@ class MainWindow(QMainWindow):
         return True
 
     def select_point(self, index: int) -> bool:
-        """Désigne un point depuis le profil : liste et carte suivent."""
+        """Désigne un point : liste, carte et profil se mettent d'accord.
+
+        Point d'entrée unique des trois vues ; aucune ne réémet en retour, ce
+        qui évite les allers-retours sans fin.
+        """
         self.points_panel.select_index(index)
+        self.profile_panel.select_index(index)
         return self.focus_point(index)
 
     def _refresh_profile(self) -> None:
@@ -511,26 +524,51 @@ class MainWindow(QMainWindow):
         if box is not None:
             self.map_view.fit_bounds(*box)
 
-    def select_draft_point(self, index: int) -> None:
-        """Un clic sur un point de la carte le désigne dans le panneau."""
-        self.points_panel.select_index(index)
-        self.map_view.select_draft_point(index)
-        if 0 <= index < len(self.draft):
+    # ------------------------------- altitude au fil de la saisie (IGN)
+
+    def _request_elevation(self, index: int) -> None:
+        """Demande l'altitude d'un point du brouillon, sans bloquer."""
+        if not 0 <= index < len(self.draft):
+            return
+        point = self.draft.points[index]
+        self.elevation_fetcher.request([(index, point.lat, point.lon)])
+
+    def _on_elevations_resolved(self, resultats) -> None:
+        """Applique les altitudes reçues, si les points n'ont pas bougé.
+
+        Le brouillon a pu changer pendant l'aller-retour réseau : on ne
+        renseigne que les points restés aux coordonnées demandées.
+        """
+        applique = False
+        for index, lat, lon, altitude in resultats:
+            if altitude is None or not 0 <= index < len(self.draft):
+                continue
             point = self.draft.points[index]
-            self.status_label.setText(
-                f"Point {index + 1} sur {len(self.draft)} — "
-                f"{point.lat:.5f} ; {point.lon:.5f}"
-            )
+            if (point.lat, point.lon) != (lat, lon):
+                continue
+            applique |= self.draft.set_service_elevation(index, altitude)
+
+        if applique:
+            self.points_panel.refresh(self.draft)
+            self.profile_panel.set_points(self.draft.points, self.draft.name)
+
+    def _on_elevation_failed(self, message: str) -> None:
+        """Une panne du service ne doit rien interrompre."""
+        self.status_label.setText(f"Altitude non récupérée — {message}")
 
     def move_draft_point(self, index: int, lat: float, lon: float) -> bool:
         """Repositionne un point après un glisser sur la carte."""
         if not self.draft.move_point(index, lat, lon):
             return False
+        # L'altitude d'origine ne vaut plus rien à cet endroit : on la vide en
+        # attendant celle du nouvel emplacement.
+        self.draft.set_service_elevation(index, None)
         self.map_view.move_draft_point(index, lat, lon)
         self._update_draft_actions()
         self.status_label.setText(
             f"Point {index + 1} déplacé en {lat:.5f} ; {lon:.5f}"
         )
+        self._request_elevation(index)
         return True
 
     def insert_draft_point(self, index: int, lat: float, lon: float) -> bool:
@@ -539,18 +577,18 @@ class MainWindow(QMainWindow):
             return False
         self.map_view.insert_draft_point(index, lat, lon)
         self._update_draft_actions()
-        self.points_panel.select_index(index)
-        self.map_view.select_draft_point(index)
+        self.select_point(index)
         self.status_label.setText(
             f"Point inséré en position {index + 1} sur {len(self.draft)}."
         )
+        self._request_elevation(index)
         return True
 
     def show_point_menu(self, index: int, x: int, y: int) -> None:
         """Menu au clic droit sur un point de la trace en édition."""
         if not 0 <= index < len(self.draft):
             return
-        self.select_draft_point(index)
+        self.select_point(index)
 
         menu = QMenu(self)
         menu.addAction(
@@ -1103,6 +1141,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):  # noqa: N802
         self._closing = True
+        # Laisser les interrogations d'altitude se terminer avant de fermer la
+        # base : elles n'y touchent pas, mais autant ne rien laisser en vol.
+        self.elevation_fetcher.enabled = False
+        self.elevation_fetcher.wait(2000)
         # Couper les remontées de la carte avant de fermer la base : un appel
         # tardif touchant une base close ferait avorter le processus.
         for signal in (

@@ -406,6 +406,53 @@ class Database:
 
     # ------------------------------------------------- duplication, découpage
 
+    def unique_folder_name(self, parent_id: int | None, base: str) -> str:
+        """Nom libre dans ce dossier, en suffixant si besoin."""
+        pris = {f.name for f in self.list_folders(parent_id)}
+        if base not in pris:
+            return base
+        rang = 2
+        while f"{base} ({rang})" in pris:
+            rang += 1
+        return f"{base} ({rang})"
+
+    def copy_folder(
+        self, folder_id: int, parent_id: int | None, name: str | None = None
+    ) -> int:
+        """Copie un dossier, ses sous-dossiers et toutes leurs traces.
+
+        Le nom est adapté si l'emplacement d'arrivée en contient déjà un
+        identique.
+        """
+        source = self.get_folder(folder_id)
+        if source is None:
+            raise NotFoundError(f"Dossier {folder_id} introuvable.")
+        if parent_id is not None and (
+            folder_id == parent_id or folder_id in self.folder_ancestors(parent_id)
+        ):
+            raise CycleError(
+                "Un dossier ne peut pas être copié dans lui-même ni dans l'un "
+                "de ses sous-dossiers."
+            )
+
+        nouveau = self.create_folder(
+            self.unique_folder_name(parent_id, name or source.name), parent_id
+        )
+        for track in self.list_tracks(folder_id):
+            points = self.get_points(track.id)
+            self.create_track(
+                track.name,
+                folder_id=nouveau,
+                points=points,
+                color=track.color,
+                opacity=track.opacity,
+                description=track.description,
+                is_loop=track.is_loop,
+            )
+        for sous in self.list_folders(folder_id):
+            self.copy_folder(sous.id, nouveau)
+        return nouveau
+
     def duplicate_track(self, track_id: int, name: str | None = None) -> int:
         """Copie une trace avec ses points, dans le même dossier."""
         track = self.get_track(track_id, with_points=True)

@@ -36,20 +36,32 @@ def qapp():
 
 
 def wait_for(condition, timeout_ms=MAP_LOAD_TIMEOUT_MS) -> bool:
-    """Fait tourner la boucle d'évènements Qt jusqu'à ce que `condition` soit vraie."""
+    """Fait tourner la boucle d'évènements Qt jusqu'à ce que `condition` soit vraie.
+
+    Le minuteur est arrêté pendant l'évaluation de la condition. Sans cela, une
+    condition qui ouvre elle-même une boucle — c'est le cas de run_js_sync, qui
+    attend une réponse du JavaScript — verrait ce minuteur se redéclencher au
+    milieu, empilant les boucles imbriquées : loop.quit() s'appliquait alors à
+    une boucle qui n'était pas celle en cours, et l'attente échouait alors même
+    que la condition était satisfaite.
+    """
     loop = QEventLoop()
     elapsed = {"ms": 0}
+    timer = QTimer()
 
     def tick():
+        timer.stop()
         elapsed["ms"] += 50
         if condition() or elapsed["ms"] >= timeout_ms:
             loop.quit()
+        else:
+            timer.start(50)
 
-    timer = QTimer()
     timer.timeout.connect(tick)
+    if condition():
+        return True
     timer.start(50)
-    if not condition():
-        loop.exec()
+    loop.exec()
     timer.stop()
     return condition()
 

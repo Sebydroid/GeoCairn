@@ -41,6 +41,7 @@ pytest tests/
 | `carto/ui/profile_panel.py` | Profil sous la carte : altitude ou vitesse |
 | `carto/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
 | `carto/elevation.py` | Altitude des points par le service IGN |
+| `carto/ui/elevation_fetcher.py` | Altitude en arrière-plan pendant la saisie |
 | `carto/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
 | `carto/resources/map.html` | Carte : couches, évènements, pont JS ↔ Python |
 | `carto/resources/leaflet/` | Leaflet 1.9.4 embarqué (fonctionnement hors ligne) |
@@ -115,7 +116,11 @@ emplacement (utilisée par les tests).
   dès le survol.
 - L'arborescence se manipule comme un explorateur de fichiers : **F2** renomme,
   **Suppr** supprime après confirmation, **Ctrl** et **Maj** étendent la
-  sélection pour agir sur plusieurs éléments à la fois.
+  sélection, et **Ctrl+C / Ctrl+X / Ctrl+V** copient, coupent et collent. Copier
+  un dossier recopie tout son contenu ; si le nom est déjà pris à l'arrivée, la
+  copie est renommée.
+- Le glisser-déposer emporte **toute la sélection**. Un élément déjà contenu
+  dans un dossier lui aussi sélectionné reste à sa place : le dossier l'emmène.
 - Supprimer un dossier supprime aussi son contenu, après confirmation.
 
 ### Afficher les traces
@@ -158,8 +163,8 @@ panneau du bas les liste un par un.
 - **Supprimer** : clic droit sur un point de la carte puis *Supprimer*, ou
   sélection multiple dans le panneau puis **Supprimer**.
 
-Le panneau liste le numéro, les coordonnées et l'altitude de chaque point. Il
-reste rempli **hors mode édition** : sélectionner une trace dans l'arborescence
+Le panneau liste le numéro, les coordonnées, l'altitude et la distance parcourue
+depuis le départ, point par point. Il reste rempli **hors mode édition** : sélectionner une trace dans l'arborescence
 affiche ses points en consultation, les boutons de modification étant inactifs
 tant qu'elle n'est pas reprise.
 
@@ -172,9 +177,23 @@ trace affichée, du départ vers l'arrivée.
 ### D'où vient l'altitude ?
 
 Une trace dessinée à la main n'a aucune altitude, et tous les GPX n'en portent
-pas. **Calculer l'altitude (IGN)** (clic droit sur une trace) interroge le
-service de calcul altimétrique de la Géoplateforme, qui s'appuie sur le RGE ALTI
-de l'IGN :
+pas.
+
+**Pendant le dessin, l'altitude est récupérée automatiquement** : chaque point
+posé — ou déplacé — interroge l'IGN en arrière-plan, sans bloquer l'interface.
+Un point déplacé perd son ancienne altitude en attendant celle de son nouvel
+emplacement.
+
+**Sans connexion, rien ne s'interrompt** : l'échec est signalé dans la barre
+d'état, et après trois tentatives infructueuses la récupération automatique se
+met en veille au lieu de solliciter un service absent. Le dessin, le
+déplacement de points et l'enregistrement restent pleinement utilisables.
+`python tests/check_hors_ligne.py` le vérifie en détournant le service vers une
+adresse injoignable.
+
+**Calculer l'altitude (IGN)** (clic droit sur une trace) traite d'un coup une
+trace entière. Les deux chemins interrogent le service de calcul altimétrique
+de la Géoplateforme, qui s'appuie sur le RGE ALTI de l'IGN :
 
     https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json
 
@@ -207,9 +226,17 @@ l'axe de droite en km/h. Une légende rappelle les couleurs.
 
 Les grandeurs absentes de la trace sont grisées, l'infobulle expliquant ce qui
 manque. Survoler le profil affiche la distance et toutes les valeurs à cet
-endroit ; **cliquer sélectionne le point dans la liste et centre la carte
-dessus** — de même qu'un clic dans la liste des points, en édition comme en
-consultation.
+endroit.
+
+Sous le tracé, les chiffres clés : **distance totale**, **dénivelés cumulés
+positif et négatif**, **vitesse maximale** et **vitesse moyenne**. Cette
+dernière rapporte la distance au temps total : les arrêts comptent.
+
+### Les trois vues sont liées
+
+Carte, liste des points et profil désignent toujours le même point. Sélectionner
+un point dans l'une le met en évidence dans les deux autres, et la carte se
+centre dessus — en édition comme en consultation.
 - **Fermer la boucle** ramène le tracé à son point de départ.
 - **Découper ici** coupe la trace en deux au point sélectionné. Le point de
   coupure appartient aux deux moitiés, qui restent donc jointives. La seconde

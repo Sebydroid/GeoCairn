@@ -375,11 +375,20 @@ def test_zoom_sur_la_trace(window):
 
     assert window.zoom_to_items(KIND_TRACK, loin_id) is True
 
-    # Délai large : l'affichage puis le recadrage font deux allers-retours vers
-    # le JavaScript, que la charge de la suite complète peut ralentir.
+    # On attend d'abord que la trace soit réellement posée sur la carte : sans
+    # cela, le recadrage porterait sur une carte encore vide et la vérification
+    # du centre échouerait de façon intermittente.
     assert wait_for(
-        lambda: 45.0 < run_js_sync(window.map_view, "map.getCenter().lat") < 46.0,
-        timeout_ms=15000,
+        lambda: run_js_sync(window.map_view, f"carto.isTrackShown({loin_id})")
+        is True,
+        timeout_ms=10000,
+    )
+    def centre():
+        return run_js_sync(window.map_view, "map.getCenter().lat")
+
+    assert wait_for(lambda: 45.0 < centre() < 46.0, timeout_ms=10000), (
+        f"centre resté à {centre()}, taille de carte "
+        f"{run_js_sync(window.map_view, 'carto.mapSize()')}"
     )
 
 
