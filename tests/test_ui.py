@@ -15,6 +15,7 @@ from carto.database import Database
 from carto.ui.main_window import MainWindow
 from carto.ui.map_view import LAYER_NAMES, MapView
 from carto.ui.points_panel import PointsPanel
+from carto.ui.profile_panel import ProfilePanel
 from carto.ui.tree_panel import (
     COL_NAME,
     KIND_FOLDER,
@@ -82,17 +83,19 @@ def test_qapplication_recoit_toujours_un_argv0(qapp):
 # ------------------------------------------------------------------- fenêtre
 
 
-def test_fenetre_principale_deux_panneaux(qapp, db):
-    """Bibliothèque et points à gauche, carte à droite."""
+def test_fenetre_principale_quatre_panneaux(qapp, db):
+    """Bibliothèque et points à gauche ; carte et profil à droite."""
     window = MainWindow(db=db)
     splitter = window.centralWidget()
-    gauche = splitter.widget(0)
+    gauche, droite = splitter.widget(0), splitter.widget(1)
 
     assert splitter.count() == 2
-    assert isinstance(splitter.widget(1), MapView)
     assert gauche.count() == 2
     assert isinstance(gauche.widget(0), TreePanel)
     assert isinstance(gauche.widget(1), PointsPanel)
+    assert droite.count() == 2
+    assert isinstance(droite.widget(0), MapView)
+    assert isinstance(droite.widget(1), ProfilePanel)
     assert "Carto" in window.windowTitle()
 
     window.close()

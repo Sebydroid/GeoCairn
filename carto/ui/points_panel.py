@@ -18,13 +18,20 @@ from PyQt6.QtWidgets import (
 )
 
 from ..editor import DraftTrack
+from .widgets import ElidedLabel
 
 
-def format_elevation(ele: float | None) -> str:
-    """Altitude lisible ; « — » quand le fichier n'en donne pas."""
-    if ele is None:
-        return "—"
-    return f"{ele:.0f} m"
+def format_elevation(ele: float | None, ele_service: float | None = None) -> str:
+    """Altitude lisible.
+
+    Celle du fichier est prioritaire ; celle calculée par l'IGN prend le relais,
+    signalée par « ~ » pour qu'on ne confonde pas les deux.
+    """
+    if ele is not None:
+        return f"{ele:.0f} m"
+    if ele_service is not None:
+        return f"~{ele_service:.0f} m"
+    return "—"
 
 
 class PointsPanel(QWidget):
@@ -37,8 +44,10 @@ class PointsPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
 
-        self.title = QLabel("Points de la trace", self)
-        self.header = QLabel("   n°       latitude ; longitude      altitude", self)
+        self.title = ElidedLabel("Points de la trace", self)
+        self.header = ElidedLabel(
+            "   n°       latitude ; longitude      altitude", self
+        )
         self.header.setEnabled(False)
         self.list = QListWidget(self)
         self.list.setSelectionMode(
@@ -72,30 +81,48 @@ class PointsPanel(QWidget):
         layout.addLayout(buttons)
 
         self._updating = False
+        self._editable = True
         self.refresh(DraftTrack())
 
     # -------------------------------------------------------------- contenu
 
     def refresh(self, draft: DraftTrack) -> None:
-        """Reconstruit la liste à partir du brouillon."""
+        """Reconstruit la liste à partir du brouillon en cours d'édition."""
+        if draft.is_empty:
+            titre = "Points de la trace"
+        elif draft.is_existing:
+            titre = f"« {draft.name} » — {len(draft)} points"
+        else:
+            titre = f"Brouillon — {len(draft)} points"
+        self._fill(draft.points, titre, editable=True)
+
+    def show_points(self, points, nom: str = "") -> None:
+        """Affiche les points d'une trace consultée, hors mode édition.
+
+        La liste reste lisible et sélectionnable ; seules les modifications
+        sont hors de portée tant que la trace n'est pas reprise.
+        """
+        titre = (
+            f"« {nom} » — {len(points)} points (consultation)"
+            if nom
+            else "Points de la trace"
+        )
+        self._fill(points, titre, editable=False)
+
+    def _fill(self, points, titre: str, editable: bool) -> None:
         selection = self.selected_indexes()
+        self._editable = editable
 
         self._updating = True
         self.list.clear()
-        for index, point in enumerate(draft.points, start=0):
+        for index, point in enumerate(points, start=0):
             self.list.addItem(
                 f"{index + 1:>4}   {point.lat:.5f} ; {point.lon:.5f}"
-                f"   {format_elevation(point.ele)}"
+                f"   {format_elevation(point.ele, point.ele_service)}"
             )
         self._updating = False
 
-        if draft.is_empty:
-            self.title.setText("Points de la trace")
-        elif draft.is_existing:
-            self.title.setText(f"« {draft.name} » — {len(draft)} points")
-        else:
-            self.title.setText(f"Brouillon — {len(draft)} points")
-
+        self.title.setText(titre)
         self._restore_selection(selection)
         self._update_buttons()
 
@@ -132,10 +159,12 @@ class PointsPanel(QWidget):
 
     def _update_buttons(self) -> None:
         indexes = self.selected_indexes()
-        self.delete_button.setEnabled(bool(indexes))
+        self.delete_button.setEnabled(self._editable and bool(indexes))
         # Découper n'a de sens qu'en un point unique, hors extrémités.
         self.split_button.setEnabled(
-            len(indexes) == 1 and 1 <= indexes[0] <= self.list.count() - 2
+            self._editable
+            and len(indexes) == 1
+            and 1 <= indexes[0] <= self.list.count() - 2
         )
 
     # -------------------------------------------------------------- actions

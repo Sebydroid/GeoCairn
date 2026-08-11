@@ -15,12 +15,19 @@ DEFAULT_TRACK_OPACITY = 0.9
 
 @dataclass(frozen=True)
 class Point:
-    """Un point GPS d'une trace."""
+    """Un point GPS d'une trace.
+
+    `ele` est l'altitude portée par le fichier GPX ; `ele_service` celle
+    calculée par le service altimétrique de l'IGN. Les deux coexistent : une
+    trace dessinée à la main n'a que la seconde, une trace importée peut avoir
+    les deux et permettre la comparaison.
+    """
 
     lat: float
     lon: float
     ele: float | None = None
     time: str | None = None
+    ele_service: float | None = None
 
     def as_tuple(self) -> tuple[float, float]:
         return (self.lat, self.lon)

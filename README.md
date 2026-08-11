@@ -38,6 +38,9 @@ pytest tests/
 | `carto/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
 | `carto/ui/points_panel.py` | Liste des points de la trace en cours d'édition |
 | `carto/ui/icons.py` | Ampoules d'affichage, dessinées à la volée |
+| `carto/ui/profile_panel.py` | Profil sous la carte : altitude ou vitesse |
+| `carto/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
+| `carto/elevation.py` | Altitude des points par le service IGN |
 | `carto/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
 | `carto/resources/map.html` | Carte : couches, évènements, pont JS ↔ Python |
 | `carto/resources/leaflet/` | Leaflet 1.9.4 embarqué (fonctionnement hors ligne) |
@@ -152,7 +155,52 @@ panneau du bas les liste un par un.
 - **Supprimer** : clic droit sur un point de la carte puis *Supprimer*, ou
   sélection multiple dans le panneau puis **Supprimer**.
 
-Le panneau liste le numéro, les coordonnées et l'altitude de chaque point.
+Le panneau liste le numéro, les coordonnées et l'altitude de chaque point. Il
+reste rempli **hors mode édition** : sélectionner une trace dans l'arborescence
+affiche ses points en consultation, les boutons de modification étant inactifs
+tant qu'elle n'est pas reprise.
+
+**Inverser le sens** (clic droit sur une trace) retourne l'ordre des points.
+Le sens de parcours est visible sur la carte : des flèches jalonnent chaque
+trace affichée, du départ vers l'arrivée.
+
+## Altitude et profil
+
+### D'où vient l'altitude ?
+
+Une trace dessinée à la main n'a aucune altitude, et tous les GPX n'en portent
+pas. **Calculer l'altitude (IGN)** (clic droit sur une trace) interroge le
+service de calcul altimétrique de la Géoplateforme, qui s'appuie sur le RGE ALTI
+de l'IGN :
+
+    https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json
+
+Ce service est **gratuit et sans clé d'accès**. Il n'y a donc **aucun MNT à
+télécharger** : le RGE ALTI complet pèse des dizaines de gigaoctets, pour un
+résultat équivalent. En contrepartie, le calcul demande une connexion à
+Internet et se limite au territoire français ; hors couverture, les altitudes
+restent vides.
+
+Mesuré sur un parcours réel du projet : 255 points en 2 secondes, avec un écart
+moyen de 2,6 m par rapport à l'altitude enregistrée dans le fichier GPX.
+`python tests/check_altimetrie.py` refait cette vérification.
+
+L'altitude du fichier n'est jamais écrasée : les deux sources coexistent et se
+comparent. Dans la liste des points, une altitude calculée est signalée par
+« ~ ».
+
+### Le profil
+
+Sous la carte, le profil de la trace sélectionnée. L'axe des abscisses porte la
+distance parcourue ; l'axe des ordonnées se choisit :
+
+- **Altitude du fichier** — celle enregistrée dans le GPX ;
+- **Altitude IGN** — celle calculée par le service ;
+- **Vitesse** — déduite des horodatages du fichier, en km/h.
+
+Les sources absentes de la trace sont grisées, avec un message expliquant ce
+qui manque. Survoler le profil affiche la distance et la valeur ; cliquer
+sélectionne le point correspondant dans la liste.
 - **Fermer la boucle** ramène le tracé à son point de départ.
 - **Découper ici** coupe la trace en deux au point sélectionné. Le point de
   coupure appartient aux deux moitiés, qui restent donc jointives. La seconde

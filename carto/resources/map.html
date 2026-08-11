@@ -17,6 +17,11 @@
             padding: 3px 8px; font: 12px "Segoe UI", Arial, sans-serif;
             color: #333; pointer-events: none;
         }
+        /* Flèches de sens de parcours. */
+        .carto-fleche div {
+            font-size: 15px; line-height: 16px; text-align: center;
+            text-shadow: 0 0 2px #ffffff, 0 0 2px #ffffff;
+        }
         /* Mode édition : le curseur indique que le clic pose un point. */
         .leaflet-container.mode-edition { cursor: crosshair; }
         .leaflet-container.mode-edition .leaflet-interactive { cursor: crosshair; }
@@ -253,6 +258,50 @@
         };
     }
 
+    // Flèches indiquant le sens de parcours. Le nombre reste modeste : elles
+    // sont recalculées à chaque zoom pour rester correctement orientées.
+    var NB_FLECHES = 8;
+
+    function arrowIcon(angle, couleur) {
+        return L.divIcon({
+            className: "carto-fleche",
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
+            html: '<div style="transform: rotate(' + angle + 'deg);'
+                + ' color:' + couleur + ';">▲</div>'
+        });
+    }
+
+    function drawArrows(trace, couleur, opacity) {
+        trace.arrows.clearLayers();
+        var points = trace.line.getLatLngs();
+        if (points.length < 2) { return; }
+
+        var pas = Math.max(1, Math.floor(points.length / (NB_FLECHES + 1)));
+        for (var i = pas; i < points.length; i += pas) {
+            var a = map.latLngToLayerPoint(points[i - 1]);
+            var b = map.latLngToLayerPoint(points[i]);
+            if (a.x === b.x && a.y === b.y) { continue; }
+            // Le triangle pointe vers le haut : 0° correspond au nord écran.
+            var angle = Math.atan2(b.x - a.x, a.y - b.y) * 180 / Math.PI;
+            var marqueur = L.marker(points[i], {
+                icon: arrowIcon(angle.toFixed(1), couleur),
+                interactive: false,
+                opacity: opacity
+            });
+            marqueur.addTo(trace.arrows);
+        }
+    }
+
+    function redrawAllArrows() {
+        Object.keys(shownTracks).forEach(function (id) {
+            var trace = shownTracks[id];
+            drawArrows(trace, trace.couleur, trace.opacity);
+        });
+    }
+
+    map.on("zoomend", redrawAllArrows);
+
     function boundsOf(ids) {
         var bounds = L.latLngBounds([]);
         (ids || []).forEach(function (id) {
@@ -388,7 +437,12 @@
                 latlngs[latlngs.length - 1], endStyle("#8a1f1f", "#e74c3c", alpha)
             ).addTo(ends).bindTooltip((name ? name + " — " : "") + "Arrivée");
 
-            shownTracks[id] = { line: line, ends: ends };
+            var arrows = L.layerGroup().addTo(map);
+            shownTracks[id] = {
+                line: line, ends: ends, arrows: arrows,
+                couleur: color || "#1f5fbf", opacity: alpha
+            };
+            drawArrows(shownTracks[id], color || "#1f5fbf", alpha);
             if (fit) { map.fitBounds(line.getBounds(), { padding: [40, 40] }); }
             return latlngs.length;
         },
@@ -398,6 +452,7 @@
             if (!trace) { return false; }
             map.removeLayer(trace.line);
             map.removeLayer(trace.ends);
+            map.removeLayer(trace.arrows);
             delete shownTracks[id];
             return true;
         },
@@ -406,6 +461,7 @@
             Object.keys(shownTracks).forEach(function (id) {
                 map.removeLayer(shownTracks[id].line);
                 map.removeLayer(shownTracks[id].ends);
+                map.removeLayer(shownTracks[id].arrows);
             });
             shownTracks = {};
             return 0;
@@ -419,7 +475,24 @@
             trace.ends.getLayers().forEach(function (marker) {
                 marker.setStyle({ opacity: alpha, fillOpacity: alpha });
             });
+            trace.couleur = color;
+            trace.opacity = alpha;
+            drawArrows(trace, color, alpha);
             return true;
+        },
+
+        arrowCount: function (id) {
+            var trace = shownTracks[id];
+            return trace ? trace.arrows.getLayers().length : 0;
+        },
+
+        arrowAngles: function (id) {
+            var trace = shownTracks[id];
+            if (!trace) { return []; }
+            return trace.arrows.getLayers().map(function (m) {
+                var html = m.options.icon.options.html;
+                return parseFloat(html.replace(/^.*rotate\(/, ""));
+            });
         },
 
         zoomTracks: function (ids) {

@@ -15,7 +15,7 @@ from .models import (
     Track,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS points (
     lon      REAL    NOT NULL,
     ele      REAL,
     time     TEXT,
+    ele_service REAL,
     PRIMARY KEY (track_id, seq)
 ) WITHOUT ROWID;
 """
@@ -85,6 +86,7 @@ class Database:
         self.path = Path(path) if path is not None else db_path()
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._closed = False
         self.conn = sqlite3.connect(str(self.path))
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
@@ -127,6 +129,12 @@ class Database:
             self.conn.execute(
                 "ALTER TABLE tracks ADD COLUMN visible INTEGER NOT NULL DEFAULT 0"
             )
+        if version < 4:
+            colonnes_points = {
+                r["name"] for r in self.conn.execute("PRAGMA table_info(points)")
+            }
+            if "ele_service" not in colonnes_points:
+                self.conn.execute("ALTER TABLE points ADD COLUMN ele_service REAL")
 
         self.conn.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'",
@@ -141,7 +149,18 @@ class Database:
         return int(row["value"]) if row else 0
 
     def close(self) -> None:
+        self._closed = True
         self.conn.close()
+
+    @property
+    def closed(self) -> bool:
+        """Vrai une fois la connexion fermée.
+
+        Permet à l'interface de ne pas interroger une base close depuis un
+        traitement différé : l'exception surviendrait dans un slot Qt, ce qui
+        interromprait tout le programme.
+        """
+        return self._closed
 
     def __enter__(self) -> "Database":
         return self
@@ -476,20 +495,56 @@ class Database:
         self, track_id: int, points: Iterable[Point], start_seq: int
     ) -> None:
         self.conn.executemany(
-            "INSERT INTO points(track_id, seq, lat, lon, ele, time)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO points(track_id, seq, lat, lon, ele, time, ele_service)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
             [
-                (track_id, start_seq + i, p.lat, p.lon, p.ele, p.time)
+                (
+                    track_id, start_seq + i, p.lat, p.lon, p.ele, p.time,
+                    p.ele_service,
+                )
                 for i, p in enumerate(points)
             ],
         )
 
     def get_points(self, track_id: int) -> list[Point]:
         rows = self.conn.execute(
-            "SELECT lat, lon, ele, time FROM points WHERE track_id = ? ORDER BY seq",
+            "SELECT lat, lon, ele, time, ele_service FROM points"
+            " WHERE track_id = ? ORDER BY seq",
             (track_id,),
         ).fetchall()
-        return [Point(r["lat"], r["lon"], r["ele"], r["time"]) for r in rows]
+        return [
+            Point(r["lat"], r["lon"], r["ele"], r["time"], r["ele_service"])
+            for r in rows
+        ]
+
+    def reverse_track(self, track_id: int) -> bool:
+        """Inverse le sens de parcours d'une trace."""
+        points = self.get_points(track_id)
+        if len(points) < 2:
+            return False
+        self.replace_points(track_id, list(reversed(points)))
+        return True
+
+    def set_service_elevations(
+        self, track_id: int, elevations: Sequence[float | None]
+    ) -> int:
+        """Enregistre les altitudes calculées par le service altimétrique.
+
+        Retourne le nombre de points renseignés. Les points sans altitude
+        (hors couverture du service) sont laissés vides.
+        """
+        with self.conn:
+            renseignes = 0
+            for seq, altitude in enumerate(elevations):
+                if altitude is None:
+                    continue
+                self.conn.execute(
+                    "UPDATE points SET ele_service = ? WHERE track_id = ? AND seq = ?",
+                    (float(altitude), track_id, seq),
+                )
+                renseignes += 1
+            self._touch(track_id)
+        return renseignes
 
     def count_points(self, track_id: int) -> int:
         row = self.conn.execute(

@@ -7,12 +7,14 @@ from pathlib import Path
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtWidgets import (
+    QApplication,
     QFileDialog,
     QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
+    QProgressDialog,
     QSplitter,
     QStyle,
     QToolBar,
@@ -22,6 +24,7 @@ from .. import APP_NAME, APP_VERSION
 from ..config import db_path
 from ..database import Database
 from ..editor import DraftTrack
+from ..elevation import ElevationError, fetch_elevations
 from ..geo import bounds, format_length, total_length
 from ..gpx import (
     GpxParseError,
@@ -32,6 +35,7 @@ from ..gpx import (
 )
 from .map_view import MapView
 from .points_panel import PointsPanel
+from .profile_panel import SOURCE_ELE_SERVICE, ProfilePanel
 from .tree_panel import KIND_ROOT, KIND_TRACK, TreePanel, track_ids_under
 
 
@@ -64,9 +68,17 @@ class MainWindow(QMainWindow):
         left.setStretchFactor(1, 2)
         left.setSizes([480, 320])
 
+        self.profile_panel = ProfilePanel(self)
+        droite = QSplitter(Qt.Orientation.Vertical, self)
+        droite.addWidget(self.map_view)
+        droite.addWidget(self.profile_panel)
+        droite.setStretchFactor(0, 4)
+        droite.setStretchFactor(1, 1)
+        droite.setSizes([560, 170])
+
         splitter = QSplitter(Qt.Orientation.Horizontal, self)
         splitter.addWidget(left)
-        splitter.addWidget(self.map_view)
+        splitter.addWidget(droite)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([300, 980])
@@ -106,6 +118,11 @@ class MainWindow(QMainWindow):
         self.points_panel.point_selected.connect(self.map_view.select_draft_point)
         self.points_panel.delete_requested.connect(self.remove_draft_points)
         self.points_panel.split_requested.connect(self.split_draft)
+
+        self.tree_panel.selection_changed.connect(self._on_tree_selection)
+        self.tree_panel.reverse_requested.connect(self.reverse_track)
+        self.tree_panel.elevation_requested.connect(self.fetch_elevations_for)
+        self.profile_panel.point_clicked.connect(self.points_panel.select_index)
 
         self._update_draft_actions()
 
@@ -338,7 +355,12 @@ class MainWindow(QMainWindow):
             len(self.draft) >= 3 and not self.draft.is_loop
         )
         self.draft_label.setText(self.draft.summary())
-        self.points_panel.refresh(self.draft)
+        if self.draft.is_empty:
+            kind, ident = self.tree_panel.current_selection()
+            self._on_tree_selection(kind, ident)
+        else:
+            self.points_panel.refresh(self.draft)
+            self.profile_panel.set_points(self.draft.points, self.draft.name)
 
     # --------------------------------------------- édition avancée (Jalon 6)
 
@@ -401,6 +423,35 @@ class MainWindow(QMainWindow):
         self._update_draft_actions()
         self.status_label.setText("Boucle fermée.")
         return True
+
+    # ------------------------------- consultation hors édition (Jalon 6+)
+
+    def _on_tree_selection(self, kind: str, ident) -> None:
+        """Sélectionner une trace montre ses points et son profil.
+
+        Pendant une édition, le brouillon garde la main : c'est lui qui est
+        listé et profilé.
+        """
+        if not self.draft.is_empty:
+            return
+        if kind != KIND_TRACK or ident is None:
+            self.points_panel.show_points([], "")
+            self.profile_panel.set_points([], "")
+            return
+
+        track = self.db.get_track(int(ident), with_points=True)
+        if track is None:
+            return
+        self.points_panel.show_points(track.points, track.name)
+        self.profile_panel.set_points(track.points, track.name)
+
+    def _refresh_profile(self) -> None:
+        """Met le profil en phase avec la trace en cours d'édition."""
+        if self.draft.is_empty:
+            kind, ident = self.tree_panel.current_selection()
+            self._on_tree_selection(kind, ident)
+        else:
+            self.profile_panel.set_points(self.draft.points, self.draft.name)
 
     def _show_draft_on_map(self, fit: bool = False) -> None:
         """Redessine le brouillon sur la carte, en le cadrant si demandé.
@@ -525,6 +576,77 @@ class MainWindow(QMainWindow):
             f"« {self.db.get_track(second).name} »."
         )
         return (premier, second)
+
+    def reverse_track(self, track_id: int) -> bool:
+        """Inverse le sens de parcours d'une trace enregistrée."""
+        track = self.db.get_track(track_id)
+        if track is None:
+            return False
+        if not self.db.reverse_track(track_id):
+            self.status_label.setText(
+                "Une trace d'un seul point n'a pas de sens de parcours."
+            )
+            return False
+
+        if track_id in self.visible_tracks:
+            self.show_track(track_id)   # redessine flèches et repères
+        self.tree_panel.refresh()
+        self.tree_panel.select_track(track_id)
+        self._refresh_profile()
+        self.status_label.setText(f"Sens de « {track.name} » inversé.")
+        return True
+
+    def fetch_elevations_for(self, track_id: int) -> int | None:
+        """Renseigne l'altitude des points par le service altimétrique IGN."""
+        track = self.db.get_track(track_id, with_points=True)
+        if track is None or not track.points:
+            return None
+
+        dialogue = QProgressDialog(
+            f"Calcul de l'altitude de « {track.name} »…",
+            "Interrompre",
+            0,
+            len(track.points),
+            self,
+        )
+        dialogue.setWindowTitle("Altitude IGN")
+        dialogue.setMinimumDuration(0)
+        dialogue.setValue(0)
+
+        def progression(faits: int, total: int) -> bool:
+            dialogue.setMaximum(total)
+            dialogue.setValue(faits)
+            QApplication.processEvents()
+            return not dialogue.wasCanceled()
+
+        try:
+            altitudes = fetch_elevations(track.points, on_progress=progression)
+        except ElevationError as exc:
+            dialogue.close()
+            QMessageBox.warning(
+                self,
+                "Altitude indisponible",
+                f"{exc}\n\nLe calcul demande une connexion à Internet ; la "
+                "couverture se limite au territoire français.",
+            )
+            return None
+        finally:
+            dialogue.close()
+
+        renseignes = self.db.set_service_elevations(track_id, altitudes)
+        self._refresh_profile()
+        self.profile_panel.set_source(SOURCE_ELE_SERVICE)
+
+        if renseignes == 0:
+            self.status_label.setText(
+                "Aucune altitude obtenue : trace hors couverture du service."
+            )
+        else:
+            self.status_label.setText(
+                f"Altitude calculée pour {renseignes} points sur "
+                f"{len(track.points)}."
+            )
+        return renseignes
 
     def duplicate_track(self, track_id: int, name: str | None = None) -> int | None:
         """Duplique une trace de la bibliothèque."""
@@ -891,10 +1013,10 @@ class MainWindow(QMainWindow):
     # -------------------------------------------------------------- signaux
 
     def _on_map_ready(self) -> None:
-        # La carte peut finir de charger après la fermeture de la fenêtre : la
-        # base serait alors close, et l'exception levée dans ce slot Qt ferait
-        # avorter le processus.
-        if self._closing:
+        # La carte peut finir de charger après la fermeture de la fenêtre, ou
+        # après que la base a été fermée par ailleurs : l'exception levée dans
+        # ce slot Qt ferait avorter le processus.
+        if self._closing or self.db.closed:
             return
         self.status_label.setText("Carte prête.")
         # Réapplique l'état courant à une carte fraîchement chargée.

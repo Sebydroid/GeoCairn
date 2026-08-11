@@ -217,6 +217,8 @@ class TreePanel(QWidget):
     zoom_requested = pyqtSignal(str, object)
     style_changed = pyqtSignal(int)
     tracks_removed = pyqtSignal(list)
+    reverse_requested = pyqtSignal(int)
+    elevation_requested = pyqtSignal(int)
 
     def __init__(
         self,
@@ -433,6 +435,14 @@ class TreePanel(QWidget):
             menu.addAction(
                 "Modifier la trace",
                 lambda: self._emit_for_track(self.resume_requested),
+            )
+            menu.addAction(
+                "Inverser le sens",
+                lambda: self._emit_for_track(self.reverse_requested),
+            )
+            menu.addAction(
+                "Calculer l'altitude (IGN)",
+                lambda: self._emit_for_track(self.elevation_requested),
             )
             menu.addAction(
                 "Dupliquer la trace",

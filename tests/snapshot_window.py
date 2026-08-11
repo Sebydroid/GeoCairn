@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QMessageBox  # noqa: E402
 from carto.app import create_app  # noqa: E402
 from carto.database import Database  # noqa: E402
 from carto.ui.main_window import MainWindow  # noqa: E402
-from carto.ui.tree_panel import COULEURS, KIND_FOLDER  # noqa: E402
+from carto.ui.tree_panel import COULEURS, KIND_FOLDER, KIND_TRACK  # noqa: E402
 
 EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
 
@@ -80,7 +80,10 @@ def main() -> int:
         # (allumée, éteinte, et dossier partiellement affiché).
         for track_id in importees[:2]:
             window.hide_track(track_id)
-        panel.select_track(importees[2] if len(importees) > 2 else importees[0])
+        # La sélection alimente la liste des points et le profil.
+        choisie = importees[2] if len(importees) > 2 else importees[0]
+        panel.select_track(choisie)
+        window.zoom_to_items(KIND_TRACK, choisie)
 
     def capture() -> None:
         window.grab().save(str(destination))
