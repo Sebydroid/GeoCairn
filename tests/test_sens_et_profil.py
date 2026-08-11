@@ -296,7 +296,7 @@ def test_l_altitude_calculee_alimente_le_profil(window, monkeypatch):
 
     window.fetch_elevations_for(track_id)
 
-    assert window.profile_panel.source == SOURCE_ELE_SERVICE
+    assert window.profile_panel.active_sources == [SOURCE_ELE_SERVICE]
     assert window.profile_panel.view.has_data is True
 
 

@@ -154,9 +154,7 @@ def test_une_seule_valeur_ne_suffit_pas():
 def test_le_panneau_propose_les_trois_sources(qapp):
     panel = ProfilePanel()
 
-    libelles = [
-        panel.source_combo.itemText(i) for i in range(panel.source_combo.count())
-    ]
+    libelles = [case.text() for case in panel.checks.values()]
 
     assert libelles == ["Altitude du fichier", "Altitude IGN", "Vitesse"]
 
@@ -165,7 +163,7 @@ def test_le_panneau_trace_l_altitude(qapp):
     panel = ProfilePanel()
     panel.set_points(AVEC_TOUT, "Rallye")
 
-    assert panel.source == SOURCE_ELE_FICHIER
+    assert panel.active_sources == [SOURCE_ELE_FICHIER]
     assert panel.view.has_data is True
     assert "Rallye" in panel.title.text()
 
@@ -175,8 +173,76 @@ def test_changement_de_source(qapp):
     panel.set_points(AVEC_TOUT, "Rallye")
 
     assert panel.set_source(SOURCE_VITESSE) is True
-    assert panel.source == SOURCE_VITESSE
+    assert panel.active_sources == [SOURCE_VITESSE]
     assert panel.view.has_data is True
+
+
+# ------------------------------------------------- plusieurs grandeurs
+
+
+def test_superposition_de_plusieurs_grandeurs(qapp):
+    panel = ProfilePanel()
+    panel.set_points(AVEC_TOUT, "Rallye")
+
+    panel.add_source(SOURCE_ELE_SERVICE)
+    panel.add_source(SOURCE_VITESSE)
+
+    assert set(panel.active_sources) == {
+        SOURCE_ELE_FICHIER, SOURCE_ELE_SERVICE, SOURCE_VITESSE
+    }
+    assert len(panel.view._series) == 3
+    assert panel.view.has_data is True
+
+
+def test_deux_echelles_pour_deux_unites(qapp):
+    """Mètres et km/h ne peuvent pas partager la même graduation."""
+    panel = ProfilePanel()
+    panel.set_points(AVEC_TOUT, "Rallye")
+    panel.set_sources([SOURCE_ELE_FICHIER, SOURCE_VITESSE])
+
+    assert panel.view.units == ["m", "km/h"]
+
+
+def test_une_seule_echelle_pour_les_deux_altitudes(qapp):
+    panel = ProfilePanel()
+    panel.set_points(AVEC_TOUT, "Rallye")
+    panel.set_sources([SOURCE_ELE_FICHIER, SOURCE_ELE_SERVICE])
+
+    assert panel.view.units == ["m"]
+    # Les deux altitudes doivent tenir sur la même graduation.
+    bas, haut = panel.view._bornes("m")
+    assert bas < 63.2 and haut > 80.0
+
+
+def test_les_grandeurs_sans_donnee_sont_ignorees(qapp):
+    """Cocher une grandeur absente ne doit pas casser le tracé."""
+    panel = ProfilePanel()
+    panel.set_points(AVEC_TOUT, "Rallye")
+    panel.set_sources([SOURCE_ELE_FICHIER, SOURCE_ELE_SERVICE])
+    panel.set_points(DESSINEE, "Dessinée")
+
+    assert panel.view.has_data is False
+    panel.view.resize(400, 120)
+    panel.view.grab()   # ne doit pas lever
+
+
+def test_aucune_grandeur_cochee(qapp):
+    panel = ProfilePanel()
+    panel.set_points(AVEC_TOUT, "Rallye")
+
+    panel.set_sources([])
+
+    assert panel.view.has_data is False
+    assert "Cochez" in panel.view._message
+
+
+def test_le_trace_multiple_se_dessine(qapp):
+    panel = ProfilePanel()
+    panel.set_points(AVEC_TOUT, "Rallye")
+    panel.set_sources([SOURCE_ELE_FICHIER, SOURCE_ELE_SERVICE, SOURCE_VITESSE])
+    panel.view.resize(600, 140)
+
+    panel.view.grab()   # légende, deux axes et trois courbes
 
 
 def test_source_indisponible_expliquee(qapp):
@@ -196,14 +262,14 @@ def test_source_indisponible_expliquee(qapp):
 def test_les_sources_absentes_sont_grisees(qapp):
     panel = ProfilePanel()
     panel.set_points(DESSINEE, "Dessinée")
-    modele = panel.source_combo.model()
 
-    assert modele.item(0).isEnabled() is False   # altitude du fichier
-    assert modele.item(2).isEnabled() is False   # vitesse
+    assert panel.checks[SOURCE_ELE_FICHIER].isEnabled() is False
+    assert panel.checks[SOURCE_VITESSE].isEnabled() is False
+    assert "horodatage" in panel.checks[SOURCE_VITESSE].toolTip()
 
     panel.set_points(AVEC_TOUT, "Complète")
-    assert modele.item(0).isEnabled() is True
-    assert modele.item(2).isEnabled() is True
+    assert panel.checks[SOURCE_ELE_FICHIER].isEnabled() is True
+    assert panel.checks[SOURCE_VITESSE].isEnabled() is True
 
 
 def test_panneau_vide(qapp):

@@ -249,7 +249,8 @@
     // --- Traces enregistrées affichées sur la carte ------------------------
     // Plusieurs traces peuvent être visibles simultanément ; chacune a sa
     // polyligne, ses repères de départ/arrivée, sa couleur et son opacité.
-    var shownTracks = {};   // identifiant -> { line, ends }
+    var shownTracks = {};   // identifiant -> { line, ends, arrows }
+    var focusMarker = null; // point désigné sur une trace consultée
 
     function endStyle(couleur, remplissage, opacity) {
         return {
@@ -413,6 +414,25 @@
             }
             return selectedIndex;
         },
+
+        // Repère indépendant du brouillon : sert à désigner un point d'une
+        // trace simplement consultée.
+        focusPoint: function (lat, lon) {
+            if (focusMarker) { map.removeLayer(focusMarker); }
+            focusMarker = L.circleMarker([lat, lon], {
+                radius: 8, color: "#b8860b", fillColor: "#ffd700",
+                fillOpacity: 1, weight: 3
+            }).addTo(map);
+            map.panTo([lat, lon]);
+            return true;
+        },
+
+        clearFocus: function () {
+            if (focusMarker) { map.removeLayer(focusMarker); focusMarker = null; }
+            return true;
+        },
+
+        hasFocus: function () { return focusMarker !== null; },
 
         selectedPoint: function () { return selectedIndex; },
         draftCount: function () { return draft.latlngs.length; },

@@ -113,6 +113,9 @@ emplacement (utilisée par les tests).
 - Traces **et** dossiers se **glissent-déposent**. Un dossier ne peut pas être
   déposé dans lui-même ni dans l'un de ses sous-dossiers : le dépôt est refusé
   dès le survol.
+- L'arborescence se manipule comme un explorateur de fichiers : **F2** renomme,
+  **Suppr** supprime après confirmation, **Ctrl** et **Maj** étendent la
+  sélection pour agir sur plusieurs éléments à la fois.
 - Supprimer un dossier supprime aussi son contenu, après confirmation.
 
 ### Afficher les traces
@@ -192,22 +195,29 @@ comparent. Dans la liste des points, une altitude calculée est signalée par
 ### Le profil
 
 Sous la carte, le profil de la trace sélectionnée. L'axe des abscisses porte la
-distance parcourue ; l'axe des ordonnées se choisit :
+distance parcourue. Trois grandeurs se cochent, **seules ou ensemble** :
 
 - **Altitude du fichier** — celle enregistrée dans le GPX ;
 - **Altitude IGN** — celle calculée par le service ;
 - **Vitesse** — déduite des horodatages du fichier, en km/h.
 
-Les sources absentes de la trace sont grisées, avec un message expliquant ce
-qui manque. Survoler le profil affiche la distance et la valeur ; cliquer
-sélectionne le point correspondant dans la liste.
+Les grandeurs de même unité partagent une échelle : les deux altitudes se
+superposent donc directement, en mètres à gauche, tandis que la vitesse prend
+l'axe de droite en km/h. Une légende rappelle les couleurs.
+
+Les grandeurs absentes de la trace sont grisées, l'infobulle expliquant ce qui
+manque. Survoler le profil affiche la distance et toutes les valeurs à cet
+endroit ; **cliquer sélectionne le point dans la liste et centre la carte
+dessus** — de même qu'un clic dans la liste des points, en édition comme en
+consultation.
 - **Fermer la boucle** ramène le tracé à son point de départ.
 - **Découper ici** coupe la trace en deux au point sélectionné. Le point de
   coupure appartient aux deux moitiés, qui restent donc jointives. La seconde
   moitié devient une trace « (suite) ». Le découpage n'agit que sur une trace
   déjà enregistrée.
-- **Enregistrer** (`Ctrl+S`) met à jour la trace reprise — sans créer de
-  doublon — et permet au passage de la renommer.
+- **Enregistrer les modifications** (`Ctrl+S`) écrit directement dans la trace
+  reprise, sans rien demander. Pour une trace neuve, le bouton s'appelle
+  *Enregistrer la trace* et demande un nom.
 
 **Fusionner avec…** (clic droit) ajoute une autre trace à la suite de celle
 sélectionnée ; les deux traces d'origine sont remplacées par la fusion.

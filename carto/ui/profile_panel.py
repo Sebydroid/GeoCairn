@@ -1,11 +1,16 @@
-"""Profil de la trace sous la carte : altitude ou vitesse selon la distance."""
+"""Profil de la trace sous la carte : altitudes et vitesse selon la distance.
+
+Plusieurs grandeurs peuvent être tracées ensemble. Celles qui ne partagent pas
+la même unité reçoivent leur propre échelle : les altitudes à gauche en mètres,
+la vitesse à droite en km/h.
+"""
 
 from __future__ import annotations
 
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QFontMetrics, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import (
-    QComboBox,
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
@@ -17,25 +22,27 @@ from ..geo import cumulative_distances, format_length, has_times, speeds
 from ..models import Point
 from .widgets import ElidedLabel
 
-#: Sources traçables en ordonnée.
+#: Grandeurs traçables en ordonnée.
 SOURCE_ELE_FICHIER = "ele"
 SOURCE_ELE_SERVICE = "ele_service"
 SOURCE_VITESSE = "vitesse"
 
+#: (clé, libellé, unité, couleur)
 SOURCES = [
-    (SOURCE_ELE_FICHIER, "Altitude du fichier", "m"),
-    (SOURCE_ELE_SERVICE, "Altitude IGN", "m"),
-    (SOURCE_VITESSE, "Vitesse", "km/h"),
+    (SOURCE_ELE_FICHIER, "Altitude du fichier", "m", "#1f5fbf"),
+    (SOURCE_ELE_SERVICE, "Altitude IGN", "m", "#2e8b39"),
+    (SOURCE_VITESSE, "Vitesse", "km/h", "#e6194b"),
 ]
 
 MARGE_GAUCHE = 52
 MARGE_BASSE = 22
-MARGE_HAUTE = 10
-MARGE_DROITE = 10
+MARGE_HAUTE = 22
+MARGE_DROITE = 12
+MARGE_DROITE_AXE = 52
 
 
 def series_for(points, source: str) -> list[float | None]:
-    """Valeurs en ordonnée pour la source demandée."""
+    """Valeurs en ordonnée pour la grandeur demandée."""
     if source == SOURCE_ELE_FICHIER:
         return [p.ele for p in points]
     if source == SOURCE_ELE_SERVICE:
@@ -46,7 +53,7 @@ def series_for(points, source: str) -> list[float | None]:
 
 
 def source_available(points, source: str) -> bool:
-    """Vrai si la source contient au moins deux valeurs exploitables."""
+    """Vrai si la trace porte au moins deux valeurs exploitables."""
     if source == SOURCE_VITESSE:
         return has_times(points)
     return sum(1 for v in series_for(points, source) if v is not None) >= 2
@@ -67,47 +74,63 @@ class ProfileView(QWidget):
 
         self._points: list[Point] = []
         self._distances: list[float] = []
-        self._valeurs: list[float | None] = []
-        self._unite = "m"
+        self._series: list[dict] = []
         self._message = "Aucune trace sélectionnée"
         self._survol: int | None = None
 
     # -------------------------------------------------------------- contenu
 
-    def set_series(
-        self,
-        points,
-        valeurs: list[float | None],
-        unite: str,
-        message: str = "",
-    ) -> None:
+    def set_series(self, points, series: list[dict], message: str = "") -> None:
+        """`series` : liste de {cle, libelle, unite, couleur, valeurs}."""
         self._points = list(points)
         self._distances = cumulative_distances(self._points)
-        self._valeurs = list(valeurs)
-        self._unite = unite
+        self._series = [s for s in series if self._exploitable(s)]
         self._message = message
         self._survol = None
         self.update()
 
+    @staticmethod
+    def _exploitable(serie: dict) -> bool:
+        return sum(1 for v in serie["valeurs"] if v is not None) >= 2
+
     def clear(self, message: str = "Aucune trace sélectionnée") -> None:
-        self.set_series([], [], "m", message)
+        self.set_series([], [], message)
 
     @property
     def has_data(self) -> bool:
-        return sum(1 for v in self._valeurs if v is not None) >= 2
+        return bool(self._series)
+
+    @property
+    def units(self) -> list[str]:
+        """Unités présentes, dans l'ordre d'apparition (deux au plus tracées)."""
+        vues: list[str] = []
+        for serie in self._series:
+            if serie["unite"] not in vues:
+                vues.append(serie["unite"])
+        return vues
 
     # ------------------------------------------------------------- géométrie
 
     def _plot_rect(self) -> QRectF:
+        droite = MARGE_DROITE_AXE if len(self.units) > 1 else MARGE_DROITE
         return QRectF(
             MARGE_GAUCHE,
             MARGE_HAUTE,
-            max(1, self.width() - MARGE_GAUCHE - MARGE_DROITE),
+            max(1, self.width() - MARGE_GAUCHE - droite),
             max(1, self.height() - MARGE_HAUTE - MARGE_BASSE),
         )
 
-    def _bornes(self) -> tuple[float, float]:
-        connues = [v for v in self._valeurs if v is not None]
+    def _bornes(self, unite: str) -> tuple[float, float]:
+        """Échelle commune à toutes les séries d'une même unité."""
+        connues = [
+            v
+            for serie in self._series
+            if serie["unite"] == unite
+            for v in serie["valeurs"]
+            if v is not None
+        ]
+        if not connues:
+            return (0.0, 1.0)
         bas, haut = min(connues), max(connues)
         if haut - bas < 1e-6:
             bas, haut = bas - 1, haut + 1
@@ -119,8 +142,7 @@ class ProfileView(QWidget):
         if not self._distances or self._distances[-1] <= 0:
             return None
         zone = self._plot_rect()
-        ratio = (x - zone.left()) / zone.width()
-        ratio = max(0.0, min(1.0, ratio))
+        ratio = max(0.0, min(1.0, (x - zone.left()) / zone.width()))
         cible = ratio * self._distances[-1]
         meilleur, ecart = 0, float("inf")
         for i, d in enumerate(self._distances):
@@ -128,11 +150,11 @@ class ProfileView(QWidget):
                 meilleur, ecart = i, abs(d - cible)
         return meilleur
 
-    def _position(self, index: int, bas: float, haut: float) -> QPointF:
+    def _position(self, index: int, valeur: float, bornes) -> QPointF:
         zone = self._plot_rect()
+        bas, haut = bornes
         total = self._distances[-1] or 1.0
         x = zone.left() + zone.width() * (self._distances[index] / total)
-        valeur = self._valeurs[index]
         y = zone.bottom() - zone.height() * ((valeur - bas) / (haut - bas))
         return QPointF(x, y)
 
@@ -152,90 +174,136 @@ class ProfileView(QWidget):
             return
 
         zone = self._plot_rect()
-        bas, haut = self._bornes()
+        unites = self.units
+        bornes = {u: self._bornes(u) for u in unites}
+        metrics = QFontMetrics(painter.font())
 
         painter.setPen(QPen(QColor("#cccccc"), 1))
         painter.drawRect(zone)
 
-        # Graduations horizontales et échelle des ordonnées.
-        metrics = QFontMetrics(painter.font())
-        painter.setPen(QColor("#666666"))
-        for i in range(5):
-            valeur = bas + (haut - bas) * i / 4
-            y = zone.bottom() - zone.height() * i / 4
-            painter.setPen(QPen(QColor("#eeeeee"), 1))
-            painter.drawLine(int(zone.left()), int(y), int(zone.right()), int(y))
-            painter.setPen(QColor("#666666"))
-            texte = f"{valeur:.0f}"
-            painter.drawText(
-                int(zone.left()) - metrics.horizontalAdvance(texte) - 6,
-                int(y) + metrics.height() // 3,
-                texte,
+        self._draw_axes(painter, metrics, zone, unites, bornes)
+        self._draw_series(painter, zone, bornes)
+        self._draw_legend(painter, metrics, zone)
+        self._draw_hover(painter, metrics, zone, bornes)
+
+        painter.end()
+
+    def _draw_axes(self, painter, metrics, zone, unites, bornes) -> None:
+        for rang, unite in enumerate(unites[:2]):
+            bas, haut = bornes[unite]
+            couleur = QColor(
+                next(s["couleur"] for s in self._series if s["unite"] == unite)
             )
+            for i in range(5):
+                valeur = bas + (haut - bas) * i / 4
+                y = zone.bottom() - zone.height() * i / 4
+                if rang == 0:
+                    painter.setPen(QPen(QColor("#eeeeee"), 1))
+                    painter.drawLine(
+                        int(zone.left()), int(y), int(zone.right()), int(y)
+                    )
+                texte = f"{valeur:.0f}"
+                painter.setPen(couleur if len(unites) > 1 else QColor("#666666"))
+                if rang == 0:
+                    x = int(zone.left()) - metrics.horizontalAdvance(texte) - 6
+                else:
+                    x = int(zone.right()) + 6
+                painter.drawText(x, int(y) + metrics.height() // 3, texte)
 
-        painter.drawText(2, int(MARGE_HAUTE) + metrics.height() // 2, self._unite)
+            painter.setPen(couleur if len(unites) > 1 else QColor("#666666"))
+            if rang == 0:
+                painter.drawText(2, int(MARGE_HAUTE) - 4, unite)
+            else:
+                painter.drawText(
+                    int(zone.right()) + 6, int(MARGE_HAUTE) - 4, unite
+                )
 
-        # Échelle des abscisses : distance cumulée.
+        # Échelle des abscisses : distance parcourue.
+        painter.setPen(QColor("#666666"))
         total = self._distances[-1]
         for i in range(5):
             x = zone.left() + zone.width() * i / 4
             texte = format_length(total * i / 4)
             largeur = metrics.horizontalAdvance(texte)
             painter.drawText(
-                int(x - largeur / 2),
-                int(zone.bottom()) + metrics.height(),
-                texte,
+                int(x - largeur / 2), int(zone.bottom()) + metrics.height(), texte
             )
 
-        # Courbe : les trous (valeurs absentes) coupent le tracé.
-        segments: list[list[QPointF]] = []
-        courant: list[QPointF] = []
-        for index, valeur in enumerate(self._valeurs):
-            if valeur is None:
-                if len(courant) > 1:
-                    segments.append(courant)
-                courant = []
-                continue
-            courant.append(self._position(index, bas, haut))
-        if len(courant) > 1:
-            segments.append(courant)
+    def _draw_series(self, painter, zone, bornes) -> None:
+        remplir = len(self._series) == 1
+        for serie in self._series:
+            limites = bornes[serie["unite"]]
+            couleur = QColor(serie["couleur"])
 
-        for segment in segments:
-            aire = QPolygonF(segment)
-            aire.append(QPointF(segment[-1].x(), zone.bottom()))
-            aire.append(QPointF(segment[0].x(), zone.bottom()))
+            # Les valeurs manquantes coupent le tracé plutôt que de le fausser.
+            segments: list[list[QPointF]] = []
+            courant: list[QPointF] = []
+            for index, valeur in enumerate(serie["valeurs"]):
+                if valeur is None:
+                    if len(courant) > 1:
+                        segments.append(courant)
+                    courant = []
+                    continue
+                courant.append(self._position(index, valeur, limites))
+            if len(courant) > 1:
+                segments.append(courant)
+
+            for segment in segments:
+                if remplir:
+                    aire = QPolygonF(segment)
+                    aire.append(QPointF(segment[-1].x(), zone.bottom()))
+                    aire.append(QPointF(segment[0].x(), zone.bottom()))
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    fond = QColor(couleur)
+                    fond.setAlpha(45)
+                    painter.setBrush(QBrush(fond))
+                    painter.drawPolygon(aire)
+
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(couleur, 2))
+                painter.drawPolyline(QPolygonF(segment))
+
+    def _draw_legend(self, painter, metrics, zone) -> None:
+        if len(self._series) < 2:
+            return
+        x = zone.left() + 8
+        y = int(MARGE_HAUTE) - 6
+        for serie in self._series:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(31, 95, 191, 45)))
-            painter.drawPolygon(aire)
+            painter.setBrush(QBrush(QColor(serie["couleur"])))
+            painter.drawRect(int(x), y - 8, 10, 10)
+            painter.setPen(QColor("#333333"))
+            painter.drawText(int(x) + 14, y, serie["libelle"])
+            x += 14 + metrics.horizontalAdvance(serie["libelle"]) + 16
 
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(QColor("#1f5fbf"), 2))
-            painter.drawPolyline(QPolygonF(segment))
+    def _draw_hover(self, painter, metrics, zone, bornes) -> None:
+        if self._survol is None or not 0 <= self._survol < len(self._distances):
+            return
 
-        # Repère de survol.
-        if self._survol is not None and 0 <= self._survol < len(self._valeurs):
-            valeur = self._valeurs[self._survol]
-            if valeur is not None:
-                position = self._position(self._survol, bas, haut)
-                painter.setPen(QPen(QColor("#b8860b"), 1, Qt.PenStyle.DashLine))
-                painter.drawLine(
-                    int(position.x()), int(zone.top()),
-                    int(position.x()), int(zone.bottom()),
-                )
-                painter.setPen(QPen(QColor("#b8860b"), 2))
-                painter.setBrush(QBrush(QColor("#ffd700")))
-                painter.drawEllipse(position, 4, 4)
+        total = self._distances[-1] or 1.0
+        x = zone.left() + zone.width() * (self._distances[self._survol] / total)
+        painter.setPen(QPen(QColor("#b8860b"), 1, Qt.PenStyle.DashLine))
+        painter.drawLine(int(x), int(zone.top()), int(x), int(zone.bottom()))
 
-                etiquette = (
-                    f"{format_length(self._distances[self._survol])} — "
-                    f"{valeur:.0f} {self._unite}"
-                )
-                painter.setPen(QColor("#333333"))
-                largeur = metrics.horizontalAdvance(etiquette)
-                x = min(position.x() + 8, zone.right() - largeur)
-                painter.drawText(int(x), int(zone.top()) + metrics.height(), etiquette)
+        morceaux = [format_length(self._distances[self._survol])]
+        for serie in self._series:
+            valeur = serie["valeurs"][self._survol]
+            if valeur is None:
+                continue
+            position = self._position(self._survol, valeur, bornes[serie["unite"]])
+            painter.setPen(QPen(QColor(serie["couleur"]), 2))
+            painter.setBrush(QBrush(QColor("#ffffff")))
+            painter.drawEllipse(position, 4, 4)
+            morceaux.append(f"{valeur:.0f} {serie['unite']}")
 
-        painter.end()
+        etiquette = "  —  ".join(morceaux)
+        painter.setPen(QColor("#333333"))
+        largeur = metrics.horizontalAdvance(etiquette)
+        painter.drawText(
+            int(min(x + 8, zone.right() - largeur)),
+            int(zone.top()) + metrics.height(),
+            etiquette,
+        )
 
     # ------------------------------------------------------------ souris
 
@@ -258,29 +326,35 @@ class ProfileView(QWidget):
 
 
 class ProfilePanel(QWidget):
-    """Profil et sélecteur de la grandeur portée en ordonnée."""
+    """Profil et cases à cocher des grandeurs à superposer."""
 
     point_clicked = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
 
-        self.title = ElidedLabel("Profil", self)
-        self.source_combo = QComboBox(self)
-        for _cle, libelle, _unite in SOURCES:
-            self.source_combo.addItem(libelle)
-        self.source_combo.currentIndexChanged.connect(self._on_source_changed)
+        # Posés avant les cases à cocher : les connecter déclenche _refresh,
+        # qui a besoin de ces attributs.
+        self._points: list[Point] = []
+        self._nom = ""
 
+        self.title = ElidedLabel("Profil", self)
         self.view = ProfileView(self)
         self.view.point_clicked.connect(self.point_clicked)
 
         entete = QHBoxLayout()
         entete.setContentsMargins(4, 2, 4, 2)
-        # Le titre prend la place restante : un espaceur la lui prendrait, et
-        # l'étiquette abrégée se réduirait à rien.
         entete.addWidget(self.title, 1)
         entete.addWidget(QLabel("Afficher :", self))
-        entete.addWidget(self.source_combo)
+
+        self.checks: dict[str, QCheckBox] = {}
+        for cle, libelle, _unite, couleur in SOURCES:
+            case = QCheckBox(libelle, self)
+            case.setStyleSheet(f"QCheckBox {{ color: {couleur}; }}")
+            case.toggled.connect(self._refresh)
+            entete.addWidget(case)
+            self.checks[cle] = case
+        self.checks[SOURCE_ELE_FICHIER].setChecked(True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -288,22 +362,36 @@ class ProfilePanel(QWidget):
         layout.addLayout(entete)
         layout.addWidget(self.view)
 
-        self._points: list[Point] = []
-        self._nom = ""
         self.set_points([], "")
 
     # -------------------------------------------------------------- contenu
 
     @property
-    def source(self) -> str:
-        return SOURCES[self.source_combo.currentIndex()][0]
+    def active_sources(self) -> list[str]:
+        return [cle for cle, case in self.checks.items() if case.isChecked()]
 
-    def set_source(self, source: str) -> bool:
-        for rang, (cle, _libelle, _unite) in enumerate(SOURCES):
-            if cle == source:
-                self.source_combo.setCurrentIndex(rang)
-                return True
-        return False
+    def set_sources(self, cles) -> None:
+        """Coche exactement les grandeurs demandées."""
+        voulues = set(cles)
+        for cle, case in self.checks.items():
+            case.blockSignals(True)
+            case.setChecked(cle in voulues)
+            case.blockSignals(False)
+        self._refresh()
+
+    def set_source(self, cle: str) -> bool:
+        """N'affiche que cette grandeur."""
+        if cle not in self.checks:
+            return False
+        self.set_sources([cle])
+        return True
+
+    def add_source(self, cle: str) -> bool:
+        """Ajoute une grandeur à celles déjà affichées."""
+        if cle not in self.checks:
+            return False
+        self.checks[cle].setChecked(True)
+        return True
 
     def set_points(self, points, nom: str = "") -> None:
         self._points = list(points)
@@ -312,35 +400,49 @@ class ProfilePanel(QWidget):
         self._refresh()
 
     def _update_availability(self) -> None:
-        """Grise les sources dont la trace ne porte pas les données."""
-        modele = self.source_combo.model()
-        for rang, (cle, _libelle, _unite) in enumerate(SOURCES):
+        """Grise les grandeurs que la trace ne porte pas."""
+        for cle, case in self.checks.items():
             disponible = source_available(self._points, cle)
-            item = modele.item(rang)
-            if item is not None:
-                item.setEnabled(disponible)
+            case.setEnabled(disponible)
+            case.setToolTip("" if disponible else self._message_absence(cle))
 
-    def _on_source_changed(self, _index: int) -> None:
-        self._refresh()
-
-    def _refresh(self) -> None:
-        cle, libelle, unite = SOURCES[self.source_combo.currentIndex()]
+    def _refresh(self, *_args) -> None:
         self.title.setText(f"Profil — {self._nom}" if self._nom else "Profil")
 
         if not self._points:
             self.view.clear("Sélectionnez une trace pour voir son profil")
             return
 
-        valeurs = series_for(self._points, cle)
-        if sum(1 for v in valeurs if v is not None) < 2:
-            self.view.set_series([], [], unite, self._message_absence(cle, libelle))
+        actives = self.active_sources
+        series = []
+        for cle, libelle, unite, couleur in SOURCES:
+            if cle not in actives:
+                continue
+            series.append(
+                {
+                    "cle": cle,
+                    "libelle": libelle,
+                    "unite": unite,
+                    "couleur": couleur,
+                    "valeurs": series_for(self._points, cle),
+                }
+            )
+
+        if not series:
+            self.view.set_series([], [], "Cochez une grandeur à afficher.")
             return
 
-        self.view.set_series(self._points, valeurs, unite)
+        self.view.set_series(self._points, series, self._message_manquant(actives))
 
-    def _message_absence(self, cle: str, libelle: str) -> str:
+    def _message_manquant(self, actives) -> str:
+        absentes = [cle for cle in actives if not source_available(self._points, cle)]
+        if not absentes:
+            return "Aucune donnée à tracer."
+        return self._message_absence(absentes[0])
+
+    def _message_absence(self, cle: str) -> str:
         if cle == SOURCE_ELE_SERVICE:
             return "Aucune altitude IGN : lancez « Calculer l'altitude (IGN) »."
         if cle == SOURCE_VITESSE:
             return "Aucun horodatage dans cette trace : vitesse indisponible."
-        return f"{libelle} absente de cette trace."
+        return "Aucune altitude dans le fichier de cette trace."

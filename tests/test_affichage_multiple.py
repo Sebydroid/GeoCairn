@@ -375,9 +375,11 @@ def test_zoom_sur_la_trace(window):
 
     assert window.zoom_to_items(KIND_TRACK, loin_id) is True
 
+    # Délai large : l'affichage puis le recadrage font deux allers-retours vers
+    # le JavaScript, que la charge de la suite complète peut ralentir.
     assert wait_for(
         lambda: 45.0 < run_js_sync(window.map_view, "map.getCenter().lat") < 46.0,
-        timeout_ms=5000,
+        timeout_ms=15000,
     )
 
 

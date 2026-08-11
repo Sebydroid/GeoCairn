@@ -106,6 +106,8 @@ class _TreeWidget(QTreeWidget):
 
     item_dropped = pyqtSignal(str, int, object)
     bulb_clicked = pyqtSignal(object)
+    rename_shortcut = pyqtSignal()
+    delete_shortcut = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -137,6 +139,16 @@ class _TreeWidget(QTreeWidget):
         """Vrai si l'abscisse tombe sur l'ampoule plutôt que sur le reste."""
         gauche = self.icon_left(item)
         return gauche <= x < gauche + BULB_WIDTH
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        """Raccourcis d'explorateur : F2 renomme, Suppr supprime."""
+        if event.key() == Qt.Key.Key_F2:
+            self.rename_shortcut.emit()
+            return
+        if event.key() == Qt.Key.Key_Delete:
+            self.delete_shortcut.emit()
+            return
+        super().keyPressEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
         position = event.position().toPoint()
@@ -236,11 +248,16 @@ class TreePanel(QWidget):
         # Sans cela, l'icône composite (ampoule + logo) serait ramenée à la
         # largeur d'une icône simple, donc écrasée.
         self.tree.setIconSize(QSize(BULB_WIDTH + ICON_SIZE, ICON_SIZE))
-        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Comme un explorateur de fichiers : Ctrl et Maj étendent la sélection.
+        self.tree.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
         self.tree.setUniformRowHeights(True)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.itemDoubleClicked.connect(self._on_double_click)
         self.tree.bulb_clicked.connect(self._on_bulb_clicked)
+        self.tree.rename_shortcut.connect(lambda: self.rename_selected())
+        self.tree.delete_shortcut.connect(lambda: self.delete_selected())
         self.tree.currentItemChanged.connect(self._on_current_changed)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.item_dropped.connect(self._on_item_dropped)
@@ -427,8 +444,12 @@ class TreePanel(QWidget):
 
         if kind == KIND_FOLDER:
             menu.addSeparator()
-            menu.addAction("Renommer le dossier…", lambda: self.rename_selected())
-            menu.addAction("Supprimer le dossier", lambda: self.delete_selected())
+            menu.addAction(
+                "Renommer le dossier…\tF2", lambda: self.rename_selected()
+            )
+            menu.addAction(
+                "Supprimer le dossier\tSuppr", lambda: self.delete_selected()
+            )
         elif kind == KIND_TRACK:
             menu.addMenu(self._build_color_menu(int(ident), menu))
             menu.addSeparator()
@@ -454,8 +475,12 @@ class TreePanel(QWidget):
             )
             menu.addSeparator()
             menu.addAction("Exporter en GPX…", self._request_export)
-            menu.addAction("Renommer la trace…", lambda: self.rename_selected())
-            menu.addAction("Supprimer la trace", lambda: self.delete_selected())
+            menu.addAction(
+                "Renommer la trace…\tF2", lambda: self.rename_selected()
+            )
+            menu.addAction(
+                "Supprimer la trace\tSuppr", lambda: self.delete_selected()
+            )
 
         menu.exec(self.tree.viewport().mapToGlobal(position))
 
@@ -646,50 +671,92 @@ class TreePanel(QWidget):
         self.status_message.emit(f"Renommé en « {name} ».")
         return True
 
+    def selected_items(self) -> list[QTreeWidgetItem]:
+        """Éléments sélectionnés, hors racine (sélection multiple)."""
+        return [
+            item
+            for item in self.tree.selectedItems()
+            if item.data(COL_BULB, ROLE_KIND) in (KIND_FOLDER, KIND_TRACK)
+        ]
+
     def delete_selected(self, confirm: bool = True) -> bool:
-        """Supprime le dossier (et son contenu) ou la trace sélectionné."""
-        kind, ident = self.current_selection()
-        if kind not in (KIND_FOLDER, KIND_TRACK):
+        """Supprime les dossiers et traces sélectionnés."""
+        items = self.selected_items()
+        if not items:
             return False
 
-        if kind == KIND_FOLDER:
-            folder = self.db.get_folder(ident)
-            question = (
-                f"Supprimer le dossier « {folder.name} » ainsi que tous les "
-                "sous-dossiers et traces qu'il contient ?"
-            )
-        else:
-            track = self.db.get_track(ident)
-            question = f"Supprimer la trace « {track.name} » ?"
+        dossiers = [
+            int(i.data(COL_BULB, ROLE_ID))
+            for i in items
+            if i.data(COL_BULB, ROLE_KIND) == KIND_FOLDER
+        ]
+        traces = [
+            int(i.data(COL_BULB, ROLE_ID))
+            for i in items
+            if i.data(COL_BULB, ROLE_KIND) == KIND_TRACK
+        ]
 
-        if confirm:
-            answer = QMessageBox.question(
-                self,
-                "Confirmer la suppression",
-                question,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer != QMessageBox.StandardButton.Yes:
-                return False
+        if confirm and not self._confirm_deletion(items, dossiers, traces):
+            return False
 
-        if kind == KIND_FOLDER:
-            item = self.find_item(KIND_FOLDER, ident)
-            disparues = track_ids_under(item) if item is not None else []
-            self.db.delete_folder(ident)
-        else:
-            disparues = [int(ident)]
-            self.db.delete_track(ident)
+        # Les traces contenues dans les dossiers supprimés disparaissent aussi.
+        disparues = set(traces)
+        for item in items:
+            if item.data(COL_BULB, ROLE_KIND) == KIND_FOLDER:
+                disparues.update(track_ids_under(item))
 
-        # Les traces supprimées doivent aussi disparaître de la carte.
+        # Les dossiers d'abord : leur suppression emporte leur contenu, et les
+        # traces déjà parties ne posent alors plus de question.
+        for folder_id in dossiers:
+            self.db.delete_folder(folder_id)
+        for track_id in traces:
+            self.db.delete_track(track_id)
+
         for track_id in disparues:
             self.visible_tracks.discard(track_id)
         if disparues:
-            self.tracks_removed.emit(disparues)
+            self.tracks_removed.emit(sorted(disparues))
 
         self.refresh()
-        self.status_message.emit("Suppression effectuée.")
+        self.status_message.emit(
+            f"{len(items)} élément(s) supprimé(s)."
+            if len(items) > 1
+            else "Suppression effectuée."
+        )
         return True
+
+    def _confirm_deletion(self, items, dossiers, traces) -> bool:
+        if len(items) == 1:
+            item = items[0]
+            if item.data(COL_BULB, ROLE_KIND) == KIND_FOLDER:
+                nom = self.db.get_folder(dossiers[0]).name
+                question = (
+                    f"Supprimer le dossier « {nom} » ainsi que tous les "
+                    "sous-dossiers et traces qu'il contient ?"
+                )
+            else:
+                question = (
+                    f"Supprimer la trace "
+                    f"« {self.db.get_track(traces[0]).name} » ?"
+                )
+        else:
+            morceaux = []
+            if dossiers:
+                morceaux.append(
+                    f"{len(dossiers)} dossier(s) et tout leur contenu"
+                )
+            if traces:
+                morceaux.append(f"{len(traces)} trace(s)")
+            question = "Supprimer " + " et ".join(morceaux) + " ?"
+
+        answer = QMessageBox.question(
+            self,
+            "Confirmer la suppression",
+            question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def _on_item_dropped(self, kind: str, ident: int, folder_id: int | None) -> None:
         if kind == KIND_TRACK:

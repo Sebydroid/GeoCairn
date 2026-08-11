@@ -115,14 +115,14 @@ class MainWindow(QMainWindow):
         self.tree_panel.style_changed.connect(self.refresh_track_style)
         self.tree_panel.tracks_removed.connect(self.forget_tracks)
 
-        self.points_panel.point_selected.connect(self.map_view.select_draft_point)
+        self.points_panel.point_selected.connect(self.focus_point)
         self.points_panel.delete_requested.connect(self.remove_draft_points)
         self.points_panel.split_requested.connect(self.split_draft)
 
         self.tree_panel.selection_changed.connect(self._on_tree_selection)
         self.tree_panel.reverse_requested.connect(self.reverse_track)
         self.tree_panel.elevation_requested.connect(self.fetch_elevations_for)
-        self.profile_panel.point_clicked.connect(self.points_panel.select_index)
+        self.profile_panel.point_clicked.connect(self.select_point)
 
         self._update_draft_actions()
 
@@ -351,6 +351,16 @@ class MainWindow(QMainWindow):
         self.action_undo.setEnabled(has_points)
         self.action_clear.setEnabled(has_points)
         self.action_save.setEnabled(len(self.draft) >= 2)
+        if self.draft.is_existing:
+            self.action_save.setText("Enregistrer les modifications")
+            self.action_save.setToolTip(
+                f"Écrire les modifications dans « {self.draft.name} » (Ctrl+S)"
+            )
+        else:
+            self.action_save.setText("Enregistrer la trace")
+            self.action_save.setToolTip(
+                "Enregistrer le brouillon dans le dossier sélectionné (Ctrl+S)"
+            )
         self.action_close_loop.setEnabled(
             len(self.draft) >= 3 and not self.draft.is_loop
         )
@@ -444,6 +454,42 @@ class MainWindow(QMainWindow):
             return
         self.points_panel.show_points(track.points, track.name)
         self.profile_panel.set_points(track.points, track.name)
+
+    def displayed_points(self) -> list:
+        """Points actuellement listés : ceux du brouillon, ou de la sélection."""
+        if not self.draft.is_empty:
+            return self.draft.points
+        kind, ident = self.tree_panel.current_selection()
+        if kind != KIND_TRACK or ident is None:
+            return []
+        track = self.db.get_track(int(ident), with_points=True)
+        return track.points if track is not None else []
+
+    def focus_point(self, index: int) -> bool:
+        """Centre la carte sur un point de la trace listée et le met en avant.
+
+        En édition, le repère du brouillon suffit ; en consultation, un repère
+        indépendant est posé sur la carte.
+        """
+        points = self.displayed_points()
+        if not 0 <= index < len(points):
+            return False
+        point = points[index]
+
+        if self.draft.is_empty:
+            self.map_view.focus_point(point.lat, point.lon)
+        else:
+            self.map_view.select_draft_point(index)
+        self.status_label.setText(
+            f"Point {index + 1} sur {len(points)} — "
+            f"{point.lat:.5f} ; {point.lon:.5f}"
+        )
+        return True
+
+    def select_point(self, index: int) -> bool:
+        """Désigne un point depuis le profil : liste et carte suivent."""
+        self.points_panel.select_index(index)
+        return self.focus_point(index)
 
     def _refresh_profile(self) -> None:
         """Met le profil en phase avec la trace en cours d'édition."""
@@ -737,21 +783,20 @@ class MainWindow(QMainWindow):
             )
             return None
 
-        if name is None:
-            name, accepted = QInputDialog.getText(
-                self, "Enregistrer la trace", "Nom de la trace :",
-                text=self.draft.name,
-            )
-            if not accepted or not name.strip():
-                return None
-
         if self.draft.is_existing:
-            # Reprise d'une trace : on met à jour au lieu d'en créer une autre.
+            # Modification d'une trace existante : on écrit directement, sans
+            # redemander de nom. Le renommage se fait par F2 ou le clic droit.
             track_id = self.draft.track_id
             self.db.replace_points(track_id, self.draft.points)
-            self.db.rename_track(track_id, name)
-            message = f"Trace « {name} » mise à jour."
+            message = f"Modifications de « {self.draft.name} » enregistrées."
         else:
+            if name is None:
+                name, accepted = QInputDialog.getText(
+                    self, "Enregistrer la trace", "Nom de la trace :",
+                    text=self.draft.name,
+                )
+                if not accepted or not name.strip():
+                    return None
             track_id = self.db.create_track(
                 name,
                 folder_id=self.tree_panel.current_folder_id(),

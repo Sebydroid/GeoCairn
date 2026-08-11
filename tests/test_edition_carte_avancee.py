@@ -134,13 +134,34 @@ def test_enregistrement_met_a_jour_la_trace_reprise(window):
     assert window.db.count_points(track_id) == 5
 
 
-def test_enregistrement_permet_de_renommer_la_trace_reprise(window):
-    track_id = trace_enregistree(window, "Ancien nom")
+def test_l_enregistrement_d_une_modification_ne_demande_rien(window, monkeypatch):
+    """« Enregistrer les modifications » écrit directement, sans boîte de nom."""
+    from PyQt6.QtWidgets import QInputDialog
+
+    def refuser(*args, **kwargs):
+        raise AssertionError("aucune boîte de dialogue ne doit s'ouvrir")
+
+    track_id = trace_enregistree(window, "Rallye")
     window.resume_track(track_id)
+    window.add_draft_point(48.935, 1.437)
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(refuser))
 
-    window.save_draft("Nouveau nom")
+    assert window.save_draft() == track_id
 
-    assert window.db.get_track(track_id).name == "Nouveau nom"
+    assert window.db.get_track(track_id).name == "Rallye"   # nom inchangé
+    assert window.db.count_points(track_id) == 5
+
+
+def test_le_bouton_change_de_libelle_en_modification(window):
+    track_id = trace_enregistree(window, "Rallye")
+
+    assert window.action_save.text() == "Enregistrer la trace"
+
+    window.resume_track(track_id)
+    assert window.action_save.text() == "Enregistrer les modifications"
+
+    window.save_draft()
+    assert window.action_save.text() == "Enregistrer la trace"
 
 
 def test_le_brouillon_se_detache_apres_enregistrement(window):

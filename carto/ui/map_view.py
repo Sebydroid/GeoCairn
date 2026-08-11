@@ -179,6 +179,13 @@ class MapView(QWebEngineView):
         """Repositionne un point du brouillon sur la carte."""
         self.run_js(f"carto.movePoint({int(index)}, {lat!r}, {lon!r});")
 
+    def focus_point(self, lat: float, lon: float) -> None:
+        """Désigne un point d'une trace consultée et centre la carte dessus."""
+        self.run_js(f"carto.focusPoint({lat!r}, {lon!r});")
+
+    def clear_focus(self) -> None:
+        self.run_js("carto.clearFocus();")
+
     def select_draft_point(self, index: int | None) -> None:
         """Met un point en évidence (−1 ou None pour n'en sélectionner aucun)."""
         self.run_js(f"carto.selectPoint({-1 if index is None else int(index)});")
