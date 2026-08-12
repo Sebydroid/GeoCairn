@@ -10,6 +10,7 @@ build/
 build-console/
 dist/
 dist-console/
+dist-installeur/
 
 *.db
 *.db-wal

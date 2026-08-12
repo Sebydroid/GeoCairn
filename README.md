@@ -41,7 +41,9 @@ pytest tests/
 | `carto/ui/toolbar_icons.py` | Icônes de la barre d'outils, dessinées à la volée |
 | `carto/simplify.py` | Décimation d'une trace (Ramer-Douglas-Peucker) |
 | `carto.spec` | Recette de construction de l'exécutable Windows |
-| `build.py` | Construction puis contrôle de la livraison |
+| `build.py` | Construction, allègement, archive, installeur, contrôle |
+| `installateur.iss` | Recette de l'installeur `.exe` (Inno Setup) |
+| `outils/installer.ps1` | Installation sans outil supplémentaire |
 | `carto/ui/profile_panel.py` | Profil sous la carte : altitude ou vitesse |
 | `carto/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
 | `carto/elevation.py` | Altitude des points par le service IGN |
@@ -52,41 +54,82 @@ pytest tests/
 
 ## Livraison Windows
 
-### Construire l'exécutable
+### Construire
 
 ```bash
-python build.py
+python build.py                  # le programme, dans dist/Carto/
+python build.py --archive        # + archive ZIP prête à distribuer
+python build.py --installateur   # + installeur .exe (voir plus bas)
+python build.py --console        # variante gardant une console, pour diagnostiquer
 ```
 
-Le programme est produit dans `dist/Carto/`, sous forme d'un dossier contenant
-`Carto.exe` et ses dépendances (environ 500 Mo, dont l'essentiel est le moteur
-de rendu de la carte). Le script enchaîne la construction et un **contrôle de la
-livraison** : il lance le programme produit avec `--autotest`, qui vérifie que
-les ressources embarquées sont présentes, que la carte se charge et que la base
-s'ouvre au bon endroit. Une livraison incomplète est ainsi détectée à la
-construction, et non chez l'utilisateur.
+Le script enchaîne la construction et un **contrôle de la livraison** : il lance
+le programme produit avec `--autotest`, qui vérifie que les ressources
+embarquées sont présentes, que la carte se charge, **qu'une trace s'y dessine**
+et que la base s'ouvre au bon endroit. Une livraison incomplète est ainsi
+détectée à la construction, et non chez l'utilisateur. La même commande sert
+après coup :
 
 ```bash
-python build.py --console   # variante gardant une console, pour diagnostiquer
 Carto.exe --autotest        # contrôler une livraison déjà installée
 ```
 
 Le mode « un dossier » est retenu plutôt que le fichier unique : le moteur de
-carte embarque son propre processus de rendu et plusieurs centaines de
-mégaoctets de ressources, qu'un fichier unique devrait extraire à chaque
-lancement.
+carte embarque son propre processus de rendu et des centaines de mégaoctets de
+ressources, qu'un fichier unique devrait extraire à chaque lancement.
 
-**Une réserve sur la machine de construction.** PyInstaller suit les
-dépendances en explorant le `PATH`. Sur cette machine, où Anaconda est installé,
-il embarquait ses bibliothèques ICU (`icuuc.dll`) : Qt, qui en attend une version
-bien plus récente, les trouvait alors dans le dossier de l'application et
-refusait de démarrer. La recette [carto.spec](carto.spec) écarte donc tout ce qui
-provient d'une autre distribution Python, et annonce ce qu'elle retire.
+**La construction dépend de ce qui traîne sur le `PATH`.** PyInstaller y cherche
+les dépendances des bibliothèques natives — et non dans l'environnement virtuel,
+même si la commande en vient. Sur une machine où Anaconda est installé, il
+embarquait ainsi ses bibliothèques ICU, que Qt trouvait alors dans le dossier de
+l'application et qui l'empêchaient de démarrer. `build.py` restreint donc le
+`PATH` au système et à l'environnement virtuel du projet, ce qui règle le
+problème à la source ; [carto.spec](carto.spec) garde un filtre en second rideau,
+au cas où la construction serait lancée autrement.
 
-### Installer et mettre à jour
+### Taille de la livraison
 
-Il n'y a rien à installer : copier le dossier `Carto` où l'on veut et lancer
-`Carto.exe`.
+329 Mo, dont **195 Mo pour le seul moteur de rendu de la carte** : c'est
+Chromium, embarqué par Qt WebEngine. Cette part est incompressible tant que la
+carte reste interactive.
+
+La recette écarte ce qui ne sert jamais, soit 184 Mo :
+
+| Écarté | Gain |
+| --- | --- |
+| Outils de développement web de Chromium (panneaux d'inspection) | 83 Mo |
+| Traductions autres que français et anglais | 52 Mo |
+| Modules Qt sans rapport (3D, contrôles Quick, multimédia, PDF…) | 47 Mo |
+
+L'archive ZIP compressée pèse **139 Mo**. Une économie supplémentaire de 20 Mo
+serait possible en retirant `opengl32sw.dll`, le rendu logiciel de secours ;
+elle n'a pas été faite, car la carte resterait blanche sur un poste dépourvu de
+pilote graphique correct.
+
+### Installer
+
+**Sans rien à installer d'autre** : décompresser `Carto-1.0.0.zip`, puis
+double-cliquer sur `Installer.bat`. Le programme est copié dans le profil de
+l'utilisateur (`%LOCALAPPDATA%\Programs\Carto`), avec raccourcis au menu
+Démarrer et sur le Bureau, et une entrée dans « Applications et
+fonctionnalités ». Aucun droit d'administrateur n'est demandé.
+`Desinstaller.bat` fait l'inverse, et **demande** avant de toucher aux traces.
+
+**Installeur `.exe` classique** : `python build.py --installateur` produit
+`dist-installeur\Carto-1.0.0-installation.exe`. Il faut pour cela Inno Setup,
+outil gratuit à installer une seule fois :
+
+```bash
+winget install JRSoftware.InnoSetup
+```
+
+Sans lui, la construction le signale et se poursuit : l'archive et son
+`Installer.bat` restent utilisables.
+
+### Mettre à jour
+
+Il n'y a rien à installer pour utiliser le logiciel : copier le dossier `Carto`
+où l'on veut et lancer `Carto.exe` suffit aussi.
 
 **Mettre à jour, c'est remplacer ce dossier.** Les traces n'y sont pas : elles
 vivent dans `AppData` (voir ci-dessous), que la mise à jour ne touche jamais. La

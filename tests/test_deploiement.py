@@ -170,3 +170,105 @@ def test_l_autotest_est_disponible():
     assert hasattr(app, "selftest")
     source = Path(app.__file__).read_text(encoding="utf-8")
     assert "--autotest" in source
+
+
+def test_l_autotest_verifie_l_affichage_d_une_trace():
+    """Après allègement, il faut s'assurer que la carte dessine encore."""
+    from carto import app
+
+    source = Path(app.__file__).read_text(encoding="utf-8")
+    assert "trace affichée sur la carte" in source
+
+
+# ------------------------------------------------------ allègement
+
+
+def test_la_recette_ecarte_les_outils_de_developpement_web():
+    """Les panneaux d'inspection de Chromium pèsent plus de 80 Mo."""
+    contenu = (Path(config.install_dir()) / "carto.spec").read_text(encoding="utf-8")
+    assert "qtwebengine_devtools_resources" in contenu
+
+
+def test_la_recette_ne_garde_que_quelques_langues():
+    contenu = (Path(config.install_dir()) / "carto.spec").read_text(encoding="utf-8")
+    assert "LANGUES" in contenu
+    assert "qtwebengine_locales" in contenu
+
+
+def test_la_recette_conserve_les_modules_necessaires_a_la_carte():
+    """Le moteur de carte s'appuie sur Qml, Quick et WebChannel."""
+    from carto import __file__ as source_carto
+
+    spec = Path(source_carto).resolve().parent.parent / "carto.spec"
+    contenu = spec.read_text(encoding="utf-8")
+
+    debut = contenu.index("MODULES_INUTILES")
+    fin = contenu.index(")", debut)
+    ecartes = contenu[debut:fin].lower()
+
+    for indispensable in ("qt6qml\"", "qt6quick\"", "qt6webchannel\"",
+                          "qt6webengine", "qt6core", "qt6gui", "qt6widgets",
+                          "qt6network", "qt6positioning", "qt6opengl"):
+        assert indispensable not in ecartes, (
+            f"{indispensable} est nécessaire au moteur de carte"
+        )
+
+
+# --------------------------------------------------- installation
+
+
+def test_les_scripts_d_installation_accompagnent_la_livraison():
+    outils = Path(config.install_dir()) / "outils"
+
+    for nom in ("installer.ps1", "Installer.bat", "Desinstaller.bat"):
+        assert (outils / nom).is_file(), f"{nom} manque"
+
+
+def test_l_installation_ne_touche_pas_aux_donnees():
+    """Le script ne doit jamais effacer AppData sans le demander."""
+    script = (Path(config.install_dir()) / "outils" / "installer.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    # La suppression des traces n'existe que derrière une question explicite.
+    assert "Supprimer aussi vos traces" in script
+    lignes = script.splitlines()
+    for rang, ligne in enumerate(lignes):
+        if "Remove-Item" in ligne and "DossierDonnees" in ligne:
+            contexte = "\n".join(lignes[max(0, rang - 4):rang])
+            assert "Read-Host" in contexte or "reponse" in contexte, (
+                "les traces ne doivent être supprimées qu'après confirmation"
+            )
+
+
+def test_l_installation_se_fait_sans_droits_administrateur():
+    script = (Path(config.install_dir()) / "outils" / "installer.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "LOCALAPPDATA" in script
+
+    iss = Path(config.install_dir()) / "installateur.iss"
+    if iss.is_file():
+        contenu = iss.read_text(encoding="utf-8")
+        assert "PrivilegesRequired=lowest" in contenu
+        assert "{localappdata}" in contenu
+
+
+def test_l_installeur_ne_supprime_que_le_dossier_du_programme():
+    iss = Path(config.install_dir()) / "installateur.iss"
+    contenu = iss.read_text(encoding="utf-8")
+
+    debut = contenu.index("[UninstallDelete]")
+    # Les commentaires — qui rappellent justement la règle — ne sont pas des
+    # instructions : seules les lignes effectives comptent.
+    instructions = [
+        ligne
+        for ligne in contenu[debut:].splitlines()
+        if ligne.strip() and not ligne.strip().startswith(";")
+    ]
+    section = "\n".join(instructions)
+
+    assert "{app}" in section
+    # Jamais le dossier des traces.
+    assert "{localappdata}\\Carto" not in section
+    assert "{userappdata}" not in section

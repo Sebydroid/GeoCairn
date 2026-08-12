@@ -79,6 +79,41 @@ def selftest(argv: list[str] | None = None) -> int:
     minuteur.stop()
 
     constater("carte chargée", pret["carte"])
+
+    # Une trace réellement dessinée : c'est le seul moyen de s'assurer que le
+    # pont JavaScript et les modules du moteur de carte sont tous là, après
+    # l'allègement de la livraison.
+    if pret["carte"]:
+        from .models import Point
+
+        trace = fenetre.db.create_track(
+            "Autotest",
+            points=[Point(48.930, 1.440), Point(48.931, 1.442),
+                    Point(48.932, 1.441)],
+        )
+        fenetre.display_track(trace)
+        affichee = {"points": 0}
+
+        def relever(valeur):
+            affichee["points"] = valeur or 0
+
+        attente = QEventLoop()
+        QTimer.singleShot(4000, attente.quit)
+        QTimer.singleShot(
+            300,
+            lambda: fenetre.map_view.page().runJavaScript(
+                f"carto.shownCount({trace})",
+                lambda v: (relever(v), attente.quit()),
+            ),
+        )
+        attente.exec()
+        constater(
+            "trace affichée sur la carte",
+            affichee["points"] == 3,
+            f"{affichee['points']} points",
+        )
+        fenetre.db.delete_track(trace)
+
     constater("base de données", db_path().is_file(), str(db_path()))
     constater(
         "données hors du dossier d'installation",
