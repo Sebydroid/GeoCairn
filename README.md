@@ -40,6 +40,8 @@ pytest tests/
 | `carto/ui/icons.py` | Ampoules d'affichage, dessinées à la volée |
 | `carto/ui/toolbar_icons.py` | Icônes de la barre d'outils, dessinées à la volée |
 | `carto/simplify.py` | Décimation d'une trace (Ramer-Douglas-Peucker) |
+| `carto.spec` | Recette de construction de l'exécutable Windows |
+| `build.py` | Construction puis contrôle de la livraison |
 | `carto/ui/profile_panel.py` | Profil sous la carte : altitude ou vitesse |
 | `carto/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
 | `carto/elevation.py` | Altitude des points par le service IGN |
@@ -48,11 +50,72 @@ pytest tests/
 | `carto/resources/map.html` | Carte : couches, évènements, pont JS ↔ Python |
 | `carto/resources/leaflet/` | Leaflet 1.9.4 embarqué (fonctionnement hors ligne) |
 
+## Livraison Windows
+
+### Construire l'exécutable
+
+```bash
+python build.py
+```
+
+Le programme est produit dans `dist/Carto/`, sous forme d'un dossier contenant
+`Carto.exe` et ses dépendances (environ 500 Mo, dont l'essentiel est le moteur
+de rendu de la carte). Le script enchaîne la construction et un **contrôle de la
+livraison** : il lance le programme produit avec `--autotest`, qui vérifie que
+les ressources embarquées sont présentes, que la carte se charge et que la base
+s'ouvre au bon endroit. Une livraison incomplète est ainsi détectée à la
+construction, et non chez l'utilisateur.
+
+```bash
+python build.py --console   # variante gardant une console, pour diagnostiquer
+Carto.exe --autotest        # contrôler une livraison déjà installée
+```
+
+Le mode « un dossier » est retenu plutôt que le fichier unique : le moteur de
+carte embarque son propre processus de rendu et plusieurs centaines de
+mégaoctets de ressources, qu'un fichier unique devrait extraire à chaque
+lancement.
+
+**Une réserve sur la machine de construction.** PyInstaller suit les
+dépendances en explorant le `PATH`. Sur cette machine, où Anaconda est installé,
+il embarquait ses bibliothèques ICU (`icuuc.dll`) : Qt, qui en attend une version
+bien plus récente, les trouvait alors dans le dossier de l'application et
+refusait de démarrer. La recette [carto.spec](carto.spec) écarte donc tout ce qui
+provient d'une autre distribution Python, et annonce ce qu'elle retire.
+
+### Installer et mettre à jour
+
+Il n'y a rien à installer : copier le dossier `Carto` où l'on veut et lancer
+`Carto.exe`.
+
+**Mettre à jour, c'est remplacer ce dossier.** Les traces n'y sont pas : elles
+vivent dans `AppData` (voir ci-dessous), que la mise à jour ne touche jamais. La
+marche à suivre :
+
+1. fermer Carto ;
+2. supprimer l'ancien dossier `Carto`, ou le renommer pour pouvoir revenir en
+   arrière ;
+3. y déposer le nouveau ;
+4. relancer `Carto.exe`.
+
+La base est **mise à niveau automatiquement** si le nouveau logiciel attend un
+format plus récent : colonnes ajoutées, données conservées. L'opération se fait à
+la première ouverture, sans rien demander. Deux tests reconstituent ce
+scénario — une mise à jour qui efface le dossier d'installation, et une base
+ancienne ouverte par la version du jour.
+
 ## Sécurité des données
 
 La base SQLite est stockée hors du répertoire d'installation, dans
 `C:\Users\[Nom]\AppData\Local\Carto\carto.db`. Elle est mise à niveau
-automatiquement quand le schéma évolue, sans perte de données. Une mise à jour du logiciel
+automatiquement quand le schéma évolue, sans perte de données.
+
+Cela vaut aussi pour la version compilée : l'emplacement est déterminé par le
+compte Windows, jamais par l'endroit d'où le programme s'exécute. Des tests le
+vérifient dans les deux cas, en simulant l'exécutable installé.
+
+**Sauvegarder ses traces**, c'est copier ce seul fichier `carto.db` — ou
+exporter les traces en GPX, format lisible par n'importe quel autre logiciel. Une mise à jour du logiciel
 (remplacement de l'exécutable) ne peut donc pas effacer les traces.
 La variable d'environnement `CARTO_DATA_DIR` permet de surcharger cet
 emplacement (utilisée par les tests).
@@ -93,7 +156,10 @@ emplacement (utilisée par les tests).
 - **Interface** : affichage simultané de plusieurs traces, ampoules d'affichage
   dans l'arborescence, couleur et transparence par trace, barre d'outils
   allégée de ses doublons.
-- Jalon 7 : à venir (packaging `.exe`).
+- **Jalon 7 — Finalisation et déploiement Windows** : fait.
+  Exécutable `.exe` construit par PyInstaller, autotest de la livraison,
+  isolation des données vérifiée y compris en version compilée, stratégie de
+  mise à jour documentée et testée.
 
 ## Utilisation
 

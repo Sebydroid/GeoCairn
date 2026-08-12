@@ -10,12 +10,29 @@ La variable d'environnement CARTO_DATA_DIR permet de surcharger cet emplacement
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from . import APP_NAME
 
 ENV_DATA_DIR = "CARTO_DATA_DIR"
 DB_FILENAME = "carto.db"
+
+
+def is_frozen() -> bool:
+    """Vrai si le programme tourne depuis l'exécutable produit par PyInstaller."""
+    return getattr(sys, "frozen", False)
+
+
+def install_dir() -> Path:
+    """Répertoire d'où le logiciel s'exécute.
+
+    C'est celui qu'une mise à jour remplace ; aucune donnée utilisateur ne doit
+    s'y trouver.
+    """
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
 
 
 def data_dir() -> Path:
@@ -39,6 +56,18 @@ def db_path() -> Path:
     return data_dir() / DB_FILENAME
 
 
+def resource_dir() -> Path:
+    """Répertoire des ressources embarquées (html, JavaScript, feuilles).
+
+    PyInstaller les dépose à côté de l'exécutable — ou, en mode fichier unique,
+    dans le dossier temporaire d'extraction désigné par `sys._MEIPASS`.
+    """
+    if is_frozen():
+        base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        return base / "carto" / "resources"
+    return Path(__file__).resolve().parent / "resources"
+
+
 def resource_path(*parts: str) -> Path:
     """Chemin d'une ressource embarquée (html, js, icônes)."""
-    return Path(__file__).resolve().parent / "resources" / Path(*parts)
+    return resource_dir() / Path(*parts)
