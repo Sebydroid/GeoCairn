@@ -152,16 +152,46 @@ def test_l_enregistrement_d_une_modification_ne_demande_rien(window, monkeypatch
     assert window.db.count_points(track_id) == 5
 
 
-def test_le_bouton_change_de_libelle_en_modification(window):
+def test_le_bouton_enregistrer_garde_son_libelle(window):
+    """Le libellé reste « Enregistrer » ; seule l'infobulle précise l'effet."""
     track_id = trace_enregistree(window, "Rallye")
 
-    assert window.action_save.text() == "Enregistrer la trace"
+    assert window.action_save.text() == "Enregistrer"
 
     window.resume_track(track_id)
-    assert window.action_save.text() == "Enregistrer les modifications"
+
+    assert window.action_save.text() == "Enregistrer"
+    assert "Rallye" in window.action_save.toolTip()
+
+
+def test_les_deux_boutons_de_mode_ne_sont_jamais_enfonces_ensemble(window):
+    """« Créer » ne doit pas paraître actif pendant une modification."""
+    track_id = trace_enregistree(window, "Rallye")
+
+    window.resume_track(track_id)
+
+    assert window.action_resume.isChecked() is True
+    assert window.action_create.isChecked() is False
+
+    window.set_edit_mode(False)
+    window.draft.reset()
+    window._update_draft_actions()
+    window.set_edit_mode(True)
+
+    assert window.action_create.isChecked() is True
+    assert window.action_resume.isChecked() is False
+
+
+def test_l_enregistrement_quitte_les_modes(window):
+    track_id = trace_enregistree(window, "Rallye")
+    window.resume_track(track_id)
+    window.add_draft_point(48.935, 1.437)
 
     window.save_draft()
-    assert window.action_save.text() == "Enregistrer la trace"
+
+    assert window.edit_mode is False
+    assert window.action_create.isChecked() is False
+    assert window.action_resume.isChecked() is False
 
 
 def test_le_brouillon_se_detache_apres_enregistrement(window):

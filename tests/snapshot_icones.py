@@ -19,6 +19,7 @@ from carto.ui.toolbar_icons import TAILLE, toolbar_icon  # noqa: E402
 NOMS = [
     "import", "export", "creer", "modifier",
     "annuler", "boucle", "enregistrer", "effacer",
+    "trace", "crayon",
 ]
 FACTEUR = 5
 

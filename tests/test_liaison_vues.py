@@ -346,7 +346,7 @@ def test_copier_coller_une_trace(window):
     assert panel.paste() == 1
 
     copies = window.db.list_tracks(dossier)
-    assert [t.name for t in copies] == ["Rallye"]
+    assert [t.name for t in copies] == ["Rallye-copie"]
     assert window.db.get_track(track_id) is not None   # l'original reste
 
 

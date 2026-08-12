@@ -16,7 +16,7 @@ from .models import (
 )
 from .simplify import simplify_to
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -126,6 +126,55 @@ class Database:
                 )
             else:
                 self._migrate(int(row["value"]))
+
+            # L'unicité des noms de traces est posée après coup : une base
+            # existante peut contenir des doublons, qu'il faut départager avant
+            # que l'index ne les refuse.
+            self._dedupe_track_names()
+            self.conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tracks_unique"
+                " ON tracks(IFNULL(folder_id, -1), name)"
+            )
+
+    def _dedupe_track_names(self) -> int:
+        """Renomme les traces homonymes d'un même dossier. Retourne le nombre."""
+        doublons = self.conn.execute(
+            "SELECT folder_id, name FROM tracks"
+            " GROUP BY IFNULL(folder_id, -1), name HAVING COUNT(*) > 1"
+        ).fetchall()
+
+        renommees = 0
+        for ligne in doublons:
+            rangs = self.conn.execute(
+                "SELECT id FROM tracks WHERE folder_id IS ? AND name = ?"
+                " ORDER BY id",
+                (ligne["folder_id"], ligne["name"]),
+            ).fetchall()
+            pris = {
+                r["name"]
+                for r in self.conn.execute(
+                    "SELECT name FROM tracks WHERE folder_id IS ?",
+                    (ligne["folder_id"],),
+                )
+            }
+            for rang in rangs[1:]:   # la première garde son nom
+                nouveau = _nom_libre(ligne["name"], pris)
+                pris.add(nouveau)
+                self.conn.execute(
+                    "UPDATE tracks SET name = ? WHERE id = ?",
+                    (nouveau, rang["id"]),
+                )
+                renommees += 1
+        return renommees
+
+    def unique_track_name(
+        self, folder_id: int | None, base: str, sauf: int | None = None
+    ) -> str:
+        """Nom de trace libre dans ce dossier, en suffixant si besoin."""
+        pris = {
+            t.name for t in self.list_tracks(folder_id) if t.id != sauf
+        }
+        return _nom_libre(base, pris)
 
     def _migrate(self, version: int) -> None:
         """Met à niveau une base existante sans toucher aux données.
@@ -303,6 +352,9 @@ class Database:
         name = name.strip() or "Trace sans nom"
         if folder_id is not None and self.get_folder(folder_id) is None:
             raise NotFoundError(f"Dossier {folder_id} introuvable.")
+        # Deux traces homonymes dans un même dossier ne se distingueraient plus
+        # dans l'arborescence : la nouvelle venue prend un suffixe.
+        name = self.unique_track_name(folder_id, name)
         with self.conn:
             cur = self.conn.execute(
                 "INSERT INTO tracks(name, folder_id, color, opacity, description,"
@@ -362,6 +414,17 @@ class Database:
         name = name.strip()
         if not name:
             raise ValueError("Le nom de la trace ne peut pas être vide.")
+        track = self.get_track(track_id)
+        if track is None:
+            raise NotFoundError(f"Trace {track_id} introuvable.")
+        # Renommage demandé par l'utilisateur : on le prévient plutôt que de
+        # suffixer dans son dos.
+        if name != track.name and name in {
+            t.name for t in self.list_tracks(track.folder_id) if t.id != track_id
+        }:
+            raise DuplicateNameError(
+                f"Une trace nommée « {name} » existe déjà dans ce dossier."
+            )
         with self.conn:
             self.conn.execute(
                 "UPDATE tracks SET name = ?, updated_at = datetime('now')"
@@ -411,11 +474,16 @@ class Database:
     def move_track(self, track_id: int, folder_id: int | None) -> None:
         if folder_id is not None and self.get_folder(folder_id) is None:
             raise NotFoundError(f"Dossier {folder_id} introuvable.")
+        track = self.get_track(track_id)
+        if track is None:
+            raise NotFoundError(f"Trace {track_id} introuvable.")
+        # Un nom déjà pris à l'arrivée ne doit pas empêcher le déplacement.
+        nom = self.unique_track_name(folder_id, track.name, sauf=track_id)
         with self.conn:
             self.conn.execute(
-                "UPDATE tracks SET folder_id = ?, updated_at = datetime('now')"
-                " WHERE id = ?",
-                (folder_id, track_id),
+                "UPDATE tracks SET folder_id = ?, name = ?,"
+                " updated_at = datetime('now') WHERE id = ?",
+                (folder_id, nom, track_id),
             )
 
     def delete_track(self, track_id: int) -> None:
@@ -435,6 +503,21 @@ class Database:
             raise NotFoundError(f"Trace {track_id} introuvable.")
         pris = {t.name for t in self.list_tracks(folder_id)}
         return _nom_libre(f"{track.name}{SUFFIXE_COPIE}", pris)
+
+    def copy_track_to(self, track_id: int, folder_id: int | None) -> int:
+        """Copie une trace dans un dossier, en la suffixant « -copie »."""
+        track = self.get_track(track_id, with_points=True)
+        if track is None:
+            raise NotFoundError(f"Trace {track_id} introuvable.")
+        return self.create_track(
+            self.copy_track_name(track_id, folder_id),
+            folder_id=folder_id,
+            points=track.points,
+            color=track.color,
+            opacity=track.opacity,
+            description=track.description,
+            is_loop=track.is_loop,
+        )
 
     def copy_folder(
         self, folder_id: int, parent_id: int | None, name: str | None = None

@@ -114,9 +114,34 @@ def _dessiner(nom: str) -> QPixmap:
         _pastille(painter, 11, 5, ACTION)
 
     elif nom == "enregistrer":
+        # Disquette : le contour, le volet coulissant et l'étiquette.
+        _stylo(painter, TRAIT, 1.6)
+        painter.drawRoundedRect(QRectF(3.5, 3.5, 15, 15), 2, 2)
+        painter.setBrush(QBrush(QColor(TRAIT)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRect(QRectF(7, 3.5, 8, 5))          # volet
+        painter.setBrush(QBrush(QColor("#ffffff")))
+        painter.drawRect(QRectF(12, 4.5, 2, 3))         # loquet
+        _stylo(painter, TRAIT, 1.4)
+        painter.drawRect(QRectF(6.5, 11, 9, 7.5))       # étiquette
+
+    elif nom == "trace":
+        # Icône des traces dans l'arborescence : ne dépend d'aucun thème.
+        _trace(painter)
+
+    elif nom == "crayon":
+        # Trace en cours de modification.
         _stylo(painter, TRAIT, 1.8)
-        painter.drawRoundedRect(QRectF(4, 4, 14, 14), 2, 2)
-        _fleche_verticale(painter, True, ACTION)
+        painter.drawLine(QPointF(4, 18), QPointF(6, 13))
+        painter.drawLine(QPointF(6, 13), QPointF(15, 4))
+        painter.drawLine(QPointF(15, 4), QPointF(18, 7))
+        painter.drawLine(QPointF(18, 7), QPointF(9, 16))
+        painter.drawLine(QPointF(9, 16), QPointF(4, 18))
+        painter.setBrush(QBrush(QColor(ACTION)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPolygon(
+            QPolygonF([QPointF(4, 18), QPointF(6, 13), QPointF(9, 16)])
+        )
 
     elif nom == "effacer":
         _stylo(painter, ALERTE, 1.8)

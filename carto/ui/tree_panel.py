@@ -27,6 +27,7 @@ from .icons import (
     ICON_SIZE,
     bulb_with,
 )
+from .toolbar_icons import toolbar_icon
 
 #: L'arbre n'a qu'une colonne : l'ampoule est dessinée dans la même icône que
 #: le logo du dossier ou de la trace, juste à sa gauche.
@@ -305,7 +306,11 @@ class TreePanel(QWidget):
 
         style = self.style()
         self._folder_icon = style.standardIcon(QStyle.StandardPixmap.SP_DirIcon)
-        self._track_icon = style.standardIcon(QStyle.StandardPixmap.SP_FileIcon)
+        # Icônes dessinées : celles du système sont parfois vides selon le thème.
+        self._track_icon = toolbar_icon("trace")
+        self._editing_icon = toolbar_icon("crayon")
+        #: Trace actuellement ouverte en modification, signalée par un crayon.
+        self.editing_track_id: int | None = None
 
         self.refresh()
 
@@ -352,13 +357,25 @@ class TreePanel(QWidget):
         for item in self._iter_items():
             kind = item.data(COL_BULB, ROLE_KIND)
             if kind == KIND_TRACK:
-                visible = int(item.data(COL_BULB, ROLE_ID)) in self.visible_tracks
+                ident = int(item.data(COL_BULB, ROLE_ID))
+                visible = ident in self.visible_tracks
                 etat = BULB_ON if visible else BULB_OFF
-                base = self._track_icon
+                base = (
+                    self._editing_icon
+                    if ident == self.editing_track_id
+                    else self._track_icon
+                )
             else:
                 etat = self.folder_state(item)
                 base = self._folder_icon
             item.setIcon(COL_NAME, bulb_with(etat, base))
+
+    def set_editing_track(self, track_id: int | None) -> None:
+        """Signale d'un crayon la trace ouverte en modification."""
+        if self.editing_track_id == track_id:
+            return
+        self.editing_track_id = track_id
+        self.refresh_bulbs()
 
     def folder_state(self, item: QTreeWidgetItem) -> str:
         """État d'affichage d'un dossier : toutes, certaines ou aucune trace."""
@@ -858,13 +875,11 @@ class TreePanel(QWidget):
         for kind, ident in elements:
             try:
                 if kind == KIND_TRACK:
-                    track = self.db.get_track(ident)
-                    if track is None:
+                    if self.db.get_track(ident) is None:
                         continue
-                    dernier = (KIND_TRACK, self.db.duplicate_track(
-                        ident, name=track.name
-                    ))
-                    self.db.move_track(dernier[1], destination)
+                    # copy_track_to pose le suffixe « -copie » en tenant compte
+                    # du dossier d'arrivée.
+                    dernier = (KIND_TRACK, self.db.copy_track_to(ident, destination))
                 else:
                     dernier = (KIND_FOLDER, self.db.copy_folder(ident, destination))
                 colles += 1

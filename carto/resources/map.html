@@ -412,7 +412,7 @@
             return true;
         },
 
-        selectPoint: function (index) {
+        selectPoint: function (index, pan) {
             var ancien = selectedIndex;
             var anciens = Object.keys(selectedSet);
             selectedIndex = (index === null || index === undefined) ? -1 : index;
@@ -427,7 +427,9 @@
             }
             if (draft.markers[selectedIndex]) {
                 draft.markers[selectedIndex].setStyle(vertexStyle(selectedIndex));
-                map.panTo(draft.latlngs[selectedIndex]);
+                // Recentrer n'a de sens que si l'on désigne le point depuis une
+                // autre vue ; poser un point là où l'on vient de cliquer, non.
+                if (pan !== false) { map.panTo(draft.latlngs[selectedIndex]); }
             }
             return selectedIndex;
         },

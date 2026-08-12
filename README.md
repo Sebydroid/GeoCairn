@@ -116,6 +116,9 @@ emplacement (utilisée par les tests).
 - Traces **et** dossiers se **glissent-déposent**. Un dossier ne peut pas être
   déposé dans lui-même ni dans l'un de ses sous-dossiers : le dépôt est refusé
   dès le survol.
+- Deux traces d'un même dossier ne peuvent pas porter le même nom : la nouvelle
+  venue est suffixée (`Rallye 2`). Un renommage vers un nom déjà pris est refusé
+  avec un message, plutôt que renommé dans le dos de l'utilisateur.
 - L'arborescence se manipule comme un explorateur de fichiers : **F2** renomme,
   **Suppr** supprime après confirmation, **Ctrl** et **Maj** étendent la
   sélection, et **Ctrl+C / Ctrl+X / Ctrl+V** copient, coupent et collent. Copier
@@ -249,9 +252,13 @@ liste (Ctrl ou Maj) se répercute elle aussi sur la carte et sur le profil.
   coupure appartient aux deux moitiés, qui restent donc jointives. La seconde
   moitié devient une trace « (suite) ». Le découpage n'agit que sur une trace
   déjà enregistrée.
-- **Enregistrer les modifications** (`Ctrl+S`) écrit directement dans la trace
-  reprise, sans rien demander. Pour une trace neuve, le bouton s'appelle
-  *Enregistrer la trace* et demande un nom.
+- **Enregistrer** (`Ctrl+S`) écrit directement dans la trace reprise, sans rien
+  demander ; une trace neuve demande son nom. L'enregistrement referme les modes
+  *Créer* et *Modifier*.
+
+Pendant une modification, la trace concernée porte un **crayon** dans
+l'arborescence, et c'est le bouton *Modifier la trace* qui apparaît enfoncé.
+Le relever quitte la modification.
 
 **Fusionner avec…** (clic droit) ajoute une autre trace à la suite de celle
 sélectionnée ; les deux traces d'origine sont remplacées par la fusion.

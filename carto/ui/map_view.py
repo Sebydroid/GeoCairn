@@ -212,9 +212,16 @@ class MapView(QWebEngineView):
     def clear_focus(self) -> None:
         self.run_js("carto.clearFocus();")
 
-    def select_draft_point(self, index: int | None) -> None:
-        """Met un point en évidence (−1 ou None pour n'en sélectionner aucun)."""
-        self.run_js(f"carto.selectPoint({-1 if index is None else int(index)});")
+    def select_draft_point(self, index: int | None, pan: bool = True) -> None:
+        """Met un point en évidence (−1 ou None pour n'en sélectionner aucun).
+
+        `pan=False` laisse la carte où elle est : utile quand le point vient
+        d'être posé à l'endroit même où l'utilisateur a cliqué.
+        """
+        self.run_js(
+            f"carto.selectPoint({-1 if index is None else int(index)},"
+            f" {str(bool(pan)).lower()});"
+        )
 
     # ------------------------------------------------ traces affichées (J5)
 

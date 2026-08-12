@@ -60,6 +60,8 @@ class MainWindow(QMainWindow):
         self._closing = False
         #: Altitude demandée à l'IGN au fil de la saisie, en arrière-plan.
         self.elevation_fetcher = ElevationFetcher(self)
+        #: Mode saisie : porté par la fenêtre, reflété par les deux boutons.
+        self._edit_mode = False
 
         self.tree_panel = TreePanel(self.db, self.visible_tracks, self)
         self.points_panel = PointsPanel(self)
@@ -160,7 +162,7 @@ class MainWindow(QMainWindow):
         )
         self.action_undo.triggered.connect(self.undo_last_point)
 
-        self.action_save = QAction("Enregistrer la trace", self)
+        self.action_save = QAction("Enregistrer", self)
         self.action_save.setIcon(toolbar_icon("enregistrer"))
         self.action_save.setShortcut(QKeySequence.StandardKey.Save)
         self.action_save.setShortcutContext(
@@ -179,10 +181,11 @@ class MainWindow(QMainWindow):
 
         self.action_resume = QAction("Modifier la trace", self)
         self.action_resume.setIcon(toolbar_icon("modifier"))
+        self.action_resume.setCheckable(True)
         self.action_resume.setToolTip(
             "Reprendre la trace sélectionnée pour la prolonger ou la corriger"
         )
-        self.action_resume.triggered.connect(self._resume_selected_track)
+        self.action_resume.toggled.connect(self._on_resume_toggled)
 
         self.action_close_loop = QAction("Fermer la boucle", self)
         self.action_close_loop.setIcon(toolbar_icon("boucle"))
@@ -284,13 +287,21 @@ class MainWindow(QMainWindow):
 
     @property
     def edit_mode(self) -> bool:
-        return self.action_create.isChecked()
+        return self._edit_mode
 
     def set_edit_mode(self, enabled: bool) -> None:
-        """Active ou quitte le mode saisie ; le brouillon reste en mémoire."""
-        if self.action_create.isChecked() != enabled:
-            self.action_create.setChecked(enabled)
-            return  # toggled() rappellera cette méthode
+        """Active ou quitte le mode saisie ; le brouillon reste en mémoire.
+
+        L'état est porté par la fenêtre, pas par la case du bouton : c'est lui
+        qui décide lequel des deux boutons — créer ou modifier — apparaît
+        enfoncé.
+        """
+        enabled = bool(enabled)
+        if self._edit_mode == enabled:
+            self._update_draft_actions()
+            return
+
+        self._edit_mode = enabled
         self.map_view.set_edit_mode(enabled)
         if enabled:
             self.status_label.setText(
@@ -346,15 +357,27 @@ class MainWindow(QMainWindow):
         self.action_clear.setEnabled(has_points)
         self.action_save.setEnabled(len(self.draft) >= 2)
         if self.draft.is_existing:
-            self.action_save.setText("Enregistrer les modifications")
             self.action_save.setToolTip(
                 f"Écrire les modifications dans « {self.draft.name} » (Ctrl+S)"
             )
         else:
-            self.action_save.setText("Enregistrer la trace")
             self.action_save.setToolTip(
                 "Enregistrer le brouillon dans le dossier sélectionné (Ctrl+S)"
             )
+
+        # Un seul des deux boutons de mode apparaît enfoncé, selon qu'on
+        # dessine une trace neuve ou qu'on en modifie une existante.
+        for action, actif in (
+            (self.action_create, self._edit_mode and not self.draft.is_existing),
+            (self.action_resume, self._edit_mode and self.draft.is_existing),
+        ):
+            action.blockSignals(True)
+            action.setChecked(actif)
+            action.blockSignals(False)
+
+        self.tree_panel.set_editing_track(
+            self.draft.track_id if self.draft.is_existing else None
+        )
         self.action_close_loop.setEnabled(
             len(self.draft) >= 3 and not self.draft.is_loop
         )
@@ -392,6 +415,13 @@ class MainWindow(QMainWindow):
         )
         return True
 
+    def _on_resume_toggled(self, checked: bool) -> None:
+        """Le bouton « Modifier » entre en modification, et en ressort."""
+        if not checked:
+            self.finish_editing()
+            return
+        self._resume_selected_track()
+
     def _resume_selected_track(self) -> None:
         kind, ident = self.tree_panel.current_selection()
         if kind != KIND_TRACK:
@@ -400,8 +430,20 @@ class MainWindow(QMainWindow):
                 "Aucune trace sélectionnée",
                 "Sélectionnez une trace dans l'arborescence pour la modifier.",
             )
+            self._update_draft_actions()   # le bouton se relève
             return
         self.resume_track(int(ident))
+
+    def finish_editing(self) -> bool:
+        """Quitte les modes saisie et modification, brouillon compris."""
+        if not self.draft.is_empty and not self._confirm_discard_draft():
+            self._update_draft_actions()
+            return False
+        self.draft.reset()
+        self.map_view.clear_draft()
+        self.set_edit_mode(False)
+        self._update_draft_actions()
+        return True
 
     def _confirm_discard_draft(self) -> bool:
         answer = QMessageBox.question(
@@ -459,8 +501,8 @@ class MainWindow(QMainWindow):
         track = self.db.get_track(int(ident), with_points=True)
         return track.points if track is not None else []
 
-    def focus_point(self, index: int) -> bool:
-        """Centre la carte sur un point de la trace listée et le met en avant.
+    def focus_point(self, index: int, center: bool = True) -> bool:
+        """Met un point en avant sur la carte, et l'y centre si demandé.
 
         En édition, le repère du brouillon suffit ; en consultation, un repère
         indépendant est posé sur la carte.
@@ -471,16 +513,17 @@ class MainWindow(QMainWindow):
         point = points[index]
 
         if self.draft.is_empty:
-            self.map_view.focus_point(point.lat, point.lon)
+            if center:
+                self.map_view.focus_point(point.lat, point.lon)
         else:
-            self.map_view.select_draft_point(index)
+            self.map_view.select_draft_point(index, pan=center)
         self.status_label.setText(
             f"Point {index + 1} sur {len(points)} — "
             f"{point.lat:.5f} ; {point.lon:.5f}"
         )
         return True
 
-    def select_point(self, index: int) -> bool:
+    def select_point(self, index: int, center: bool = True) -> bool:
         """Désigne un point : liste, carte et profil se mettent d'accord.
 
         Point d'entrée unique des trois vues ; aucune ne réémet en retour, ce
@@ -488,7 +531,7 @@ class MainWindow(QMainWindow):
         """
         self.points_panel.select_index(index)
         self.profile_panel.select_index(index)
-        return self.focus_point(index)
+        return self.focus_point(index, center=center)
 
     def select_points(self, indexes) -> int:
         """Désigne plusieurs points à la fois dans les trois vues."""
@@ -582,7 +625,9 @@ class MainWindow(QMainWindow):
             return False
         self.map_view.insert_draft_point(index, lat, lon)
         self._update_draft_actions()
-        self.select_point(index)
+        # Le point est posé là où l'utilisateur a cliqué : le désigner suffit,
+        # recentrer la carte ferait sauter la vue sans raison.
+        self.select_point(index, center=False)
         self.status_label.setText(
             f"Point inséré en position {index + 1} sur {len(self.draft)}."
         )
@@ -898,6 +943,9 @@ class MainWindow(QMainWindow):
 
         self.draft.reset()
         self.map_view.clear_draft()
+        # L'enregistrement clôt le travail : on quitte les modes saisie et
+        # modification plutôt que de laisser croire qu'on édite encore.
+        self.set_edit_mode(False)
         self._update_draft_actions()
 
         self.tree_panel.refresh()

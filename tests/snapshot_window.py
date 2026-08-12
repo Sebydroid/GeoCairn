@@ -84,6 +84,10 @@ def main() -> int:
         choisie = importees[2] if len(importees) > 2 else importees[0]
         panel.select_track(choisie)
         window.zoom_to_items(KIND_TRACK, choisie)
+        # Une trace en modification, pour montrer le crayon dans l'arbre.
+        if len(importees) > 3:
+            window.resume_track(importees[3])
+            window.zoom_to_items(KIND_TRACK, choisie)
 
     def capture() -> None:
         window.grab().save(str(destination))
