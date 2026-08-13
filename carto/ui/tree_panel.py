@@ -704,12 +704,19 @@ class TreePanel(QWidget):
         if kind not in (KIND_FOLDER, KIND_TRACK):
             return False
 
-        if kind == KIND_FOLDER:
-            current = self.db.get_folder(ident).name
-            titre, libelle = "Renommer le dossier", "Nouveau nom :"
-        else:
-            current = self.db.get_track(ident).name
-            titre, libelle = "Renommer la trace", "Nouveau nom :"
+        # L'élément a pu disparaître depuis le dernier affichage de l'arbre :
+        # mieux vaut se taire que de tomber en panne dans un signal Qt.
+        element = (
+            self.db.get_folder(ident)
+            if kind == KIND_FOLDER
+            else self.db.get_track(ident)
+        )
+        if element is None:
+            self.refresh()
+            return False
+        current = element.name
+        titre = "Renommer le dossier" if kind == KIND_FOLDER else "Renommer la trace"
+        libelle = "Nouveau nom :"
 
         if name is None:
             name, accepted = QInputDialog.getText(
@@ -792,16 +799,17 @@ class TreePanel(QWidget):
     def _confirm_deletion(self, items, dossiers, traces) -> bool:
         if len(items) == 1:
             item = items[0]
+            nom = item.text(COL_NAME)
             if item.data(COL_BULB, ROLE_KIND) == KIND_FOLDER:
-                nom = self.db.get_folder(dossiers[0]).name
+                dossier = self.db.get_folder(dossiers[0])
                 question = (
-                    f"Supprimer le dossier « {nom} » ainsi que tous les "
-                    "sous-dossiers et traces qu'il contient ?"
+                    f"Supprimer le dossier « {dossier.name if dossier else nom} » "
+                    "ainsi que tous les sous-dossiers et traces qu'il contient ?"
                 )
             else:
+                trace = self.db.get_track(traces[0])
                 question = (
-                    f"Supprimer la trace "
-                    f"« {self.db.get_track(traces[0]).name} » ?"
+                    f"Supprimer la trace « {trace.name if trace else nom} » ?"
                 )
         else:
             morceaux = []
@@ -911,9 +919,7 @@ class TreePanel(QWidget):
         self.refresh()
         self.select_folder(folder_id)
 
-        destination = "Mes traces"
-        if parent_id is not None:
-            destination = self.db.get_folder(parent_id).name
+        destination = self._nom_dossier(parent_id)
         self.status_message.emit(
             f"Dossier « {folder.name} » déplacé vers « {destination} »."
         )
@@ -929,13 +935,17 @@ class TreePanel(QWidget):
         self.refresh()
         self.select_track(track_id)
 
-        destination = "Mes traces"
-        if folder_id is not None:
-            destination = self.db.get_folder(folder_id).name
         self.status_message.emit(
-            f"« {track.name} » déplacée vers « {destination} »."
+            f"« {track.name} » déplacée vers « {self._nom_dossier(folder_id)} »."
         )
         return True
+
+    def _nom_dossier(self, folder_id: int | None) -> str:
+        """Nom affichable d'un dossier ; « Mes traces » pour la racine."""
+        if folder_id is None:
+            return "Mes traces"
+        dossier = self.db.get_folder(folder_id)
+        return dossier.name if dossier is not None else "Mes traces"
 
     # -------------------------------------------------------------- signaux
 

@@ -139,6 +139,40 @@ def test_un_succes_remet_le_compteur_a_zero(qapp):
     assert fetcher.echecs == 0
 
 
+def test_le_resultat_survit_au_ramasse_miettes(qapp):
+    """Le porte-signaux ne doit pas disparaître avant la remise du résultat.
+
+    Qt détruit le QRunnable dès la fin de son exécution ; si l'objet Python
+    partait avec lui, l'altitude calculée n'arriverait jamais jusqu'à la
+    fenêtre, sans le moindre message.
+    """
+    import gc
+
+    fetcher = ElevationFetcher(fetch=reponse([63.2]))
+    recus = []
+    fetcher.resolved.connect(recus.append)
+
+    fetcher.request([(0, 48.93, 1.44)])
+    fetcher.wait(5000)      # le travail de fond est terminé…
+    gc.collect()            # …et rien ne doit avoir été libéré entre-temps
+
+    assert wait_for(lambda: bool(recus), timeout_ms=5000)
+    assert recus[0] == [(0, 48.93, 1.44, 63.2)]
+
+
+def test_les_requetes_terminees_sont_oubliees(qapp):
+    """La mémoire ne doit pas enfler d'une requête à l'autre."""
+    fetcher = ElevationFetcher(fetch=reponse([63.2, 64.0, 65.0]))
+    recus = []
+    fetcher.resolved.connect(recus.append)
+
+    for i in range(3):
+        fetcher.request([(i, 48.93, 1.44)])
+
+    assert wait_for(lambda: len(recus) == 3, timeout_ms=5000)
+    assert wait_for(lambda: not fetcher._en_vol, timeout_ms=5000)
+
+
 # ------------------------------------------------ intégration fenêtre
 
 

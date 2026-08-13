@@ -396,9 +396,13 @@ class MainWindow(QMainWindow):
         track = self.db.get_track(track_id, with_points=True)
         if track is None or not track.points:
             self.status_label.setText("Cette trace ne contient aucun point.")
+            # Sans cela, le bouton « Modifier » resterait enfoncé alors que
+            # rien n'a été repris.
+            self._update_draft_actions()
             return False
 
         if not self.draft.is_empty and not self._confirm_discard_draft():
+            self._update_draft_actions()
             return False
 
         self.draft.load_track(track)
@@ -670,6 +674,9 @@ class MainWindow(QMainWindow):
 
     def split_draft(self, index: int) -> tuple[int, int] | None:
         """Découpe en deux la trace reprise, au point sélectionné."""
+        if self.draft.is_existing and self.db.get_track(self.draft.track_id) is None:
+            self._detach_draft_if_gone({self.draft.track_id})
+
         if not self.draft.is_existing:
             QMessageBox.information(
                 self,
@@ -745,6 +752,10 @@ class MainWindow(QMainWindow):
         )
         dialogue.setWindowTitle("Altitude IGN")
         dialogue.setMinimumDuration(0)
+        # Le calcul fait tourner la boucle d'évènements pour rester réactif :
+        # sans dialogue modal, l'utilisateur pourrait supprimer la trace, voire
+        # fermer la fenêtre, pendant que le résultat est encore attendu.
+        dialogue.setWindowModality(Qt.WindowModality.ApplicationModal)
         dialogue.setValue(0)
 
         def progression(faits: int, total: int) -> bool:
@@ -883,6 +894,10 @@ class MainWindow(QMainWindow):
             return None
 
         fusion = self.db.merge_tracks(track_id, other_id)
+        # Les deux sources n'existent plus : sans cela leur tracé restait
+        # dessiné sur la carte, superposé à la fusion, sans aucun moyen de
+        # l'effacer puisque l'arborescence ne les propose plus.
+        self.forget_tracks([track_id, other_id])
         self.tree_panel.refresh()
         self.tree_panel.select_track(fusion)
         self.display_track(fusion)
@@ -919,11 +934,19 @@ class MainWindow(QMainWindow):
             )
             return None
 
+        # La trace reprise a pu disparaître entre-temps (suppression, fusion) :
+        # le brouillon redevient alors une trace neuve plutôt que d'écrire dans
+        # une trace inexistante.
+        if self.draft.is_existing and self.db.get_track(self.draft.track_id) is None:
+            self._detach_draft_if_gone({self.draft.track_id})
+
         if self.draft.is_existing:
             # Modification d'une trace existante : on écrit directement, sans
             # redemander de nom. Le renommage se fait par F2 ou le clic droit.
             track_id = self.draft.track_id
             self.db.replace_points(track_id, self.draft.points)
+            # Une boucle fermée pendant la modification doit rester une boucle.
+            self.db.set_track_loop(track_id, self.draft.is_loop)
             message = f"Modifications de « {self.draft.name} » enregistrées."
         else:
             if name is None:
@@ -1063,10 +1086,35 @@ class MainWindow(QMainWindow):
 
     def forget_tracks(self, track_ids: list) -> None:
         """Retire de la carte des traces qui viennent d'être supprimées."""
-        for track_id in track_ids:
-            self.map_view.hide_track(int(track_id))
-            self.visible_tracks.discard(int(track_id))
+        disparues = {int(t) for t in track_ids}
+        for track_id in disparues:
+            self.map_view.hide_track(track_id)
+            self.visible_tracks.discard(track_id)
+        self._detach_draft_if_gone(disparues)
         self.tree_panel.refresh_bulbs()
+
+    def _detach_draft_if_gone(self, disparues: set[int]) -> bool:
+        """Détache le brouillon de la trace qu'il modifiait si elle a disparu.
+
+        Supprimer (ou fusionner) une trace pendant qu'on la modifie laissait le
+        brouillon rattaché à un identifiant qui n'existe plus : l'enregistrement
+        suivant levait alors une erreur au beau milieu d'un signal Qt, ce qui
+        interrompait tout le programme. Le travail en cours est conservé, mais
+        redevient une trace neuve.
+        """
+        if self.draft.track_id is None or self.draft.track_id not in disparues:
+            return False
+
+        points = self.draft.points
+        ancien = self.draft.name
+        self.draft.reset(name=ancien)
+        self.draft.set_points(points)
+        self._update_draft_actions()
+        self.status_label.setText(
+            f"« {ancien} » a été supprimée : le tracé en cours est devenu une "
+            "trace neuve, à enregistrer sous un nouveau nom."
+        )
+        return True
 
     def refresh_track_style(self, track_id: int) -> None:
         """Applique sur la carte la couleur et la transparence enregistrées."""

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from . import APP_NAME, APP_VERSION  # noqa: F401  (APP_VERSION sert à l'autotest)
+from .config import db_path
+from .database import Database
 from .ui.main_window import MainWindow
 
 
@@ -34,7 +37,22 @@ def run(argv: list[str] | None = None) -> int:
         return selftest(arguments)
 
     app = create_app(argv)
-    window = MainWindow()
+
+    # Une base illisible (fichier abîmé, disque plein, dossier verrouillé) ne
+    # doit pas faire disparaître le programme sans un mot : la version compilée
+    # n'a pas de console où lire la moindre explication.
+    try:
+        db = Database()
+    except (sqlite3.Error, OSError) as exc:
+        QMessageBox.critical(
+            None,
+            f"{APP_NAME} — base de données inaccessible",
+            f"Impossible d'ouvrir la bibliothèque de traces :\n{exc}\n\n"
+            f"Fichier concerné :\n{db_path()}",
+        )
+        return 1
+
+    window = MainWindow(db=db)
     window.show()
     return app.exec()
 

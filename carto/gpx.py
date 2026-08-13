@@ -21,6 +21,15 @@ SCHEMA_LOCATION = (
 #: Caractères interdits dans un nom de fichier Windows.
 _FORBIDDEN = r'[<>:"/\\|?*\x00-\x1f]'
 
+#: Noms réservés par Windows aux périphériques. Même suivis d'une extension,
+#: ils ne désignent pas un fichier : « CON.gpx » écrit dans la console, et
+#: l'export ne laisse aucune trace sur le disque.
+_RESERVES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{n}" for n in range(1, 10)),
+    *(f"LPT{n}" for n in range(1, 10)),
+}
+
 
 def safe_filename(name: str, extension: str = ".gpx") -> str:
     """Transforme un nom de trace en nom de fichier valide sous Windows."""
@@ -28,6 +37,8 @@ def safe_filename(name: str, extension: str = ".gpx") -> str:
     cleaned = re.sub(r"\s+", " ", cleaned)
     if not cleaned:
         cleaned = "trace"
+    if cleaned.upper() in _RESERVES:
+        cleaned = f"{cleaned}_"
     return cleaned + extension
 
 

@@ -11,7 +11,7 @@ d'elle-même plutôt que de harceler un service absent.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
+from PyQt6.QtCore import QObject, QRunnable, QThreadPool, Qt, pyqtSignal
 
 from ..elevation import ElevationError, fetch_elevations
 from ..models import Point
@@ -30,6 +30,9 @@ class _Signals(QObject):
 
     resolved = pyqtSignal(list)   # [(index, lat, lon, altitude), ...]
     failed = pyqtSignal(str)
+    #: Émis en dernier, quelle que soit l'issue : l'appelant peut alors oublier
+    #: la requête.
+    finished = pyqtSignal()
 
 
 class _Request(QRunnable):
@@ -40,26 +43,32 @@ class _Request(QRunnable):
         self.demandes = list(demandes)   # [(index, lat, lon), ...]
         self.signals = _Signals()
         self._fetch = fetch
+        # Qt détruirait l'objet à la fin de run(), emportant le porte-signaux
+        # avant la remise du résultat. C'est l'appelant qui décide de l'oublier.
+        self.setAutoDelete(False)
 
     def run(self) -> None:
         points = [Point(lat, lon) for _index, lat, lon in self.demandes]
         try:
-            altitudes = fetch_elevations(points, fetch=self._fetch)
-        except ElevationError as exc:
-            self.signals.failed.emit(str(exc))
-            return
-        except Exception as exc:  # noqa: BLE001
-            # Filet de sécurité : rien venant du réseau ne doit remonter
-            # jusqu'à faire tomber l'application.
-            self.signals.failed.emit(f"Altitude indisponible : {exc}")
-            return
+            try:
+                altitudes = fetch_elevations(points, fetch=self._fetch)
+            except ElevationError as exc:
+                self.signals.failed.emit(str(exc))
+                return
+            except Exception as exc:  # noqa: BLE001
+                # Filet de sécurité : rien venant du réseau ne doit remonter
+                # jusqu'à faire tomber l'application.
+                self.signals.failed.emit(f"Altitude indisponible : {exc}")
+                return
 
-        self.signals.resolved.emit(
-            [
-                (index, lat, lon, altitude)
-                for (index, lat, lon), altitude in zip(self.demandes, altitudes)
-            ]
-        )
+            self.signals.resolved.emit(
+                [
+                    (index, lat, lon, altitude)
+                    for (index, lat, lon), altitude in zip(self.demandes, altitudes)
+                ]
+            )
+        finally:
+            self.signals.finished.emit()
 
 
 class ElevationFetcher(QObject):
@@ -77,14 +86,27 @@ class ElevationFetcher(QObject):
         self._pool = QThreadPool(self)
         # Une seule interrogation à la fois : le service n'aime pas les rafales.
         self._pool.setMaxThreadCount(1)
+        #: Interrogations en vol. Qt détruit le QRunnable dès la fin de son
+        #: exécution ; sans cette référence, le porte-signaux disparaîtrait avec
+        #: lui avant que le résultat n'ait été remis au fil de l'interface, et
+        #: l'altitude serait perdue sans explication.
+        self._en_vol: set = set()
 
     def request(self, demandes) -> bool:
         """Demande l'altitude de points désignés par (indice, lat, lon)."""
         if not self.enabled or not demandes:
             return False
         requete = _Request(demandes, fetch=self._fetch)
+        self._en_vol.add(requete)
         requete.signals.resolved.connect(self._on_resolved)
         requete.signals.failed.connect(self._on_failed)
+        # Connexion explicitement différée : la fin est signalée depuis le fil
+        # de travail, et l'oubli doit avoir lieu après la remise du résultat au
+        # fil de l'interface, pas avant.
+        requete.signals.finished.connect(
+            lambda r=requete: self._en_vol.discard(r),
+            Qt.ConnectionType.QueuedConnection,
+        )
         self._pool.start(requete)
         return True
 

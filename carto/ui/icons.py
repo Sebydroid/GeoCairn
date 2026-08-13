@@ -89,7 +89,10 @@ def bulb_with(state: str, base: QIcon, size: int = 16) -> QIcon:
     Un item d'arbre n'accepte qu'une icône par colonne : les deux sont donc
     dessinées côte à côte, l'ampoule occupant les `BULB_WIDTH` premiers pixels.
     """
-    cle = (state, size, id(base))
+    # La clé s'appuie sur le contenu de l'icône, pas sur l'adresse de l'objet :
+    # Python réattribue les adresses libérées, et une icône construite après la
+    # disparition d'une autre aurait hérité de son dessin.
+    cle = (state, size, int(base.cacheKey()))
     if cle in _cache_composite:
         return _cache_composite[cle]
 

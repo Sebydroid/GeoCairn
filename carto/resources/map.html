@@ -97,9 +97,9 @@
     });
 
     map.on("click", function (e) {
-        // Le clic qui suit un glissement de point ne doit pas poser un point
-        // supplémentaire au même endroit.
-        if (justDragged) { justDragged = false; return; }
+        // Le clic qui suit immédiatement un glissement de point, une insertion
+        // ou un clic droit ne doit pas poser un point supplémentaire.
+        if (gesteRecent()) { return; }
         if (bridge) { bridge.js_map_click(e.latlng.lat, e.latlng.lng); }
     });
 
@@ -167,7 +167,7 @@
         });
         marker.on("contextmenu", function (e) {
             L.DomEvent.stop(e);
-            justDragged = true;   // le clic droit ne doit rien ajouter
+            noterGeste();   // le clic droit ne doit rien ajouter
             if (!bridge) { return; }
             var point = e.containerPoint || map.latLngToContainerPoint(e.latlng);
             bridge.js_point_context(
@@ -205,9 +205,9 @@
     draft.line.on("click", function (e) {
         if (!draft.editing || draft.latlngs.length < 2) { return; }
         L.DomEvent.stop(e);
-        // Le rendu canvas relaie aussi le clic à la carte : sans ce drapeau,
+        // Le rendu canvas relaie aussi le clic à la carte : sans cette marque,
         // un point serait ajouté à la fin en plus de l'insertion.
-        justDragged = true;
+        noterGeste();
         var segment = closestSegment(e.latlng);
         if (segment >= 0 && bridge) {
             bridge.js_point_inserted(segment + 1, e.latlng.lat, e.latlng.lng);
@@ -219,7 +219,24 @@
     // à la main plutôt que d'ajouter un L.marker par point, ce qui serait
     // lourd sur les traces de plusieurs milliers de points.
     var dragged = null;
-    var justDragged = false;
+
+    // Certains gestes (glisser un point, insérer sur un segment, clic droit)
+    // déclenchent ensuite un clic sur la carte qu'il faut ignorer. Un simple
+    // drapeau restait allumé quand ce clic ne venait jamais — après un clic
+    // droit, par exemple — et avalait alors le clic suivant, pourtant
+    // légitime. On retient donc l'instant du geste, et on n'ignore que ce qui
+    // le suit immédiatement.
+    var dernierGeste = 0;
+    var DELAI_GESTE_MS = 400;
+
+    function noterGeste() { dernierGeste = Date.now(); }
+
+    function gesteRecent() {
+        if (!dernierGeste) { return false; }
+        var recent = (Date.now() - dernierGeste) < DELAI_GESTE_MS;
+        dernierGeste = 0;
+        return recent;
+    }
 
     map.on("mousemove", function (e) {
         if (!dragged) { return; }
@@ -235,7 +252,7 @@
         dragged = null;
         map.dragging.enable();
         // Dans les deux cas, le clic qui suit ne doit pas poser un point.
-        justDragged = true;
+        noterGeste();
 
         var immobile = start
             && e.latlng.lat === start[0] && e.latlng.lng === start[1];

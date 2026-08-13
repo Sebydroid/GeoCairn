@@ -432,6 +432,15 @@ class Database:
                 (name, track_id),
             )
 
+    def set_track_loop(self, track_id: int, is_loop: bool) -> None:
+        """Mémorise si la trace forme une boucle."""
+        with self.conn:
+            self.conn.execute(
+                "UPDATE tracks SET is_loop = ?, updated_at = datetime('now')"
+                " WHERE id = ?",
+                (int(bool(is_loop)), track_id),
+            )
+
     def set_track_visible(self, track_id: int, visible: bool) -> None:
         """Mémorise si la trace doit être affichée à la réouverture."""
         with self.conn:
@@ -712,9 +721,19 @@ class Database:
         Retourne le nombre de points renseignés. Les points sans altitude
         (hors couverture du service) sont laissés vides.
         """
+        # Les altitudes arrivent dans l'ordre des points, pas dans celui des
+        # numéros de séquence : on relit ces derniers plutôt que de les supposer
+        # consécutifs à partir de zéro.
+        sequences = [
+            row["seq"]
+            for row in self.conn.execute(
+                "SELECT seq FROM points WHERE track_id = ? ORDER BY seq",
+                (track_id,),
+            )
+        ]
         with self.conn:
             renseignes = 0
-            for seq, altitude in enumerate(elevations):
+            for seq, altitude in zip(sequences, elevations):
                 if altitude is None:
                     continue
                 self.conn.execute(
@@ -731,18 +750,24 @@ class Database:
         ).fetchone()
         return int(row["n"])
 
+    def _next_seq(self, track_id: int) -> int:
+        """Prochain numéro d'ordre libre pour cette trace."""
+        row = self.conn.execute(
+            "SELECT IFNULL(MAX(seq), -1) AS last FROM points WHERE track_id = ?",
+            (track_id,),
+        ).fetchone()
+        return int(row["last"]) + 1
+
     def append_points(self, track_id: int, points: Sequence[Point]) -> None:
         """Ajoute des points à la fin de la trace (reprise de trace)."""
         if self.get_track(track_id) is None:
             raise NotFoundError(f"Trace {track_id} introuvable.")
         if not points:
             return
-        row = self.conn.execute(
-            "SELECT IFNULL(MAX(seq), -1) AS last FROM points WHERE track_id = ?",
-            (track_id,),
-        ).fetchone()
         with self.conn:
-            self._insert_points(track_id, points, start_seq=int(row["last"]) + 1)
+            self._insert_points(
+                track_id, points, start_seq=self._next_seq(track_id)
+            )
             self._touch(track_id)
 
     def replace_points(self, track_id: int, points: Sequence[Point]) -> None:
@@ -766,7 +791,11 @@ class Database:
         already_closed = points[0].as_tuple() == points[-1].as_tuple()
         with self.conn:
             if not already_closed:
-                self._insert_points(track_id, [points[0]], start_seq=len(points))
+                # Le numéro d'ordre se lit en base plutôt que de se déduire du
+                # nombre de points : une suite trouée écraserait un point.
+                self._insert_points(
+                    track_id, [points[0]], start_seq=self._next_seq(track_id)
+                )
             self.conn.execute(
                 "UPDATE tracks SET is_loop = 1, updated_at = datetime('now')"
                 " WHERE id = ?",

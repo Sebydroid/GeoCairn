@@ -730,3 +730,58 @@ def test_duplication_dans_le_meme_dossier(window):
     copie = window.duplicate_track(track_id)
 
     assert window.db.get_track(copie).folder_id == dossier
+
+
+# ------------------------------- clic avalé après un geste (régression)
+
+
+def test_le_clic_qui_suit_un_geste_est_ignore(window):
+    """Un glisser ou une insertion déclenche un clic parasite, à écarter."""
+    resultat = run_js_sync(
+        window.map_view, "(function(){ noterGeste(); return gesteRecent(); })()"
+    )
+    assert resultat is True
+
+
+def test_un_geste_ancien_n_avale_plus_le_clic_suivant(window):
+    """Régression : après un clic droit, le clic gauche suivant était perdu.
+
+    Le clic droit sur un repère marquait le geste sans qu'aucun clic ne suive :
+    la marque restait posée et mangeait le clic légitime d'après, fût-il
+    plusieurs minutes plus tard.
+    """
+    resultat = run_js_sync(
+        window.map_view,
+        "(function(){ noterGeste();"
+        " dernierGeste = dernierGeste - DELAI_GESTE_MS - 100;"
+        " return gesteRecent(); })()",
+    )
+    assert resultat is False
+
+
+def test_un_point_est_ajoute_apres_un_clic_droit_sur_un_repere(window, monkeypatch):
+    """Bout en bout : clic droit sur un repère, puis clic sur la carte."""
+    # Le menu contextuel est ouvert pour de bon : sans cela, son exec()
+    # bloquerait le test comme il bloque la fenêtre.
+    monkeypatch.setattr(QMenu, "exec", lambda self, *a, **k: None)
+
+    track_id = trace_enregistree(window)
+    window.resume_track(track_id)
+    assert wait_for(lambda: js_draft(window) == 4, timeout_ms=5000)
+
+    run_js_sync(
+        window.map_view,
+        "draft.vertices.getLayers()[1].fire('contextmenu',"
+        " {originalEvent: {}, latlng: draft.line.getLatLngs()[1]}); true",
+    )
+    # Le temps que l'utilisateur lise le menu et le referme.
+    run_js_sync(
+        window.map_view,
+        "dernierGeste = dernierGeste - DELAI_GESTE_MS - 100; true",
+    )
+    run_js_sync(
+        window.map_view,
+        "map.fire('click', {latlng: L.latLng(48.934, 1.438)}); true",
+    )
+
+    assert wait_for(lambda: len(window.draft) == 5, timeout_ms=5000)
