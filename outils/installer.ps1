@@ -36,7 +36,18 @@ function Creer-Raccourci($chemin, $cible) {
     $raccourci.Save()
 }
 
+function Verifier-Ferme($geste) {
+    # Windows retient les fichiers d'une application qui tourne : les
+    # remplacer laisserait une installation a moitie faite, melant deux
+    # versions. Mieux vaut s'arreter avant d'avoir touche a quoi que ce soit.
+    if (Get-Process -Name $Nom -ErrorAction SilentlyContinue) {
+        throw "$Nom est ouvert. Fermez la fenetre, puis relancez $geste."
+    }
+}
+
 function Installer {
+    Verifier-Ferme "l'installation"
+
     # $PSScriptRoot et non $MyInvocation : dans une fonction, ce dernier
     # désigne l'appel, pas le fichier.
     $source = $PSScriptRoot
@@ -107,6 +118,7 @@ function Installer {
 }
 
 function Desinstaller-Carto {
+    Verifier-Ferme "la desinstallation"
     Ecrire "Desinstallation de $Nom"
 
     foreach ($lien in @($MenuDemarrer, $Bureau)) {

@@ -93,6 +93,23 @@ class CycleError(ValueError):
     """Le déplacement demandé rendrait un dossier descendant de lui-même."""
 
 
+class FutureSchemaError(RuntimeError):
+    """La base a été écrite par une version plus récente du logiciel.
+
+    Cas d'un retour en arrière : l'utilisateur réinstalle une version
+    antérieure par-dessus la dernière. Les migrations ne savent qu'avancer ;
+    poursuivre reviendrait à laisser du code d'hier écrire dans un schéma
+    d'aujourd'hui, et à abîmer les traces sans prévenir.
+    """
+
+    def __init__(self, trouvee: int, connue: int) -> None:
+        super().__init__(
+            f"base en version {trouvee}, ce logiciel ne connaît que la {connue}"
+        )
+        self.trouvee = trouvee
+        self.connue = connue
+
+
 class Database:
     """Couche d'accès aux données.
 
@@ -109,7 +126,16 @@ class Database:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute("PRAGMA journal_mode = WAL")
-        self._create_schema()
+        try:
+            self._create_schema()
+        except BaseException:
+            # Une ouverture refusée ne doit pas laisser le fichier retenu :
+            # sous Windows, il resterait verrouillé jusqu'à la fin du
+            # programme, et l'utilisateur ne pourrait ni le déplacer ni le
+            # restaurer d'une sauvegarde.
+            self._closed = True
+            self.conn.close()
+            raise
 
     # ------------------------------------------------------------------ base
 
@@ -193,7 +219,9 @@ class Database:
         `CREATE TABLE IF NOT EXISTS` n'ajoute pas les colonnes apparues après
         coup : il faut les poser explicitement.
         """
-        if version >= SCHEMA_VERSION:
+        if version > SCHEMA_VERSION:
+            raise FutureSchemaError(version, SCHEMA_VERSION)
+        if version == SCHEMA_VERSION:
             return
 
         colonnes = {

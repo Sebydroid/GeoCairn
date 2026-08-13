@@ -8,8 +8,9 @@ import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from . import APP_NAME, APP_VERSION  # noqa: F401  (APP_VERSION sert à l'autotest)
+from . import mutex
 from .config import db_path
-from .database import Database
+from .database import Database, FutureSchemaError
 from .ui.main_window import MainWindow
 
 
@@ -38,12 +39,27 @@ def run(argv: list[str] | None = None) -> int:
 
     app = create_app(argv)
 
+    # Signale à l'installeur que le programme tourne : sans cela, une mise à
+    # jour lancée fenêtre ouverte remplacerait des fichiers que Windows retient.
+    mutex.claim()
+
     # Une base illisible ou protégée en écriture (fichier abîmé, restauré d'une
     # sauvegarde, disque plein, dossier verrouillé) ne doit pas faire
     # disparaître le programme sans un mot : la version compilée n'a pas de
     # console où lire la moindre explication.
     try:
         db = Database()
+    except FutureSchemaError as exc:
+        QMessageBox.critical(
+            None,
+            f"{APP_NAME} — version trop ancienne",
+            f"Vos traces ont été enregistrées par une version plus récente de "
+            f"{APP_NAME} ({exc.trouvee} contre {exc.connue} ici).\n\n"
+            "Réinstallez la dernière version pour les rouvrir : celle-ci "
+            "risquerait de les abîmer.\n\n"
+            f"Fichier concerné :\n{db_path()}",
+        )
+        return 1
     except (sqlite3.Error, OSError) as exc:
         QMessageBox.critical(
             None,

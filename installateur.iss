@@ -35,12 +35,32 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\{#MonExe}
 UninstallDisplayName={#MonNom} {#MaVersion}
 
+; Mise à jour, programme ouvert. Windows retient les fichiers d'une application
+; qui tourne : sans ces trois directives, la copie échouerait à mi-chemin et
+; laisserait un mélange de deux versions.
+;   AppMutex          : la marque posée par le programme (voir carto/mutex.py).
+;                       Le nom doit rester identique des deux côtés.
+;   CloseApplications : propose de fermer ce qui retient les fichiers.
+;   RestartApplications=no : la page finale offre déjà de relancer Carto ;
+;                       le redémarrage automatique en ouvrirait un second.
+AppMutex=Carto.Application.Running
+CloseApplications=yes
+RestartApplications=no
+
 [Languages]
 Name: "francais"; MessagesFile: "compiler:Languages\French.isl"
 
 [Tasks]
 Name: "bureau"; Description: "Créer un raccourci sur le Bureau"; \
     GroupDescription: "Raccourcis :"
+
+[InstallDelete]
+; Le dossier des bibliothèques est vidé avant la copie. « ignoreversion » écrase
+; les fichiers de même nom mais n'efface jamais les autres : une bibliothèque
+; d'une version antérieure y resterait, et serait chargée au lancement à la
+; place de la nouvelle. Seul {app}\_internal est visé — le désinstalleur, lui,
+; vit directement dans {app} et doit survivre à la mise à jour.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 ; Tout le dossier produit par PyInstaller, sauf les scripts d'installation
