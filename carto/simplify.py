@@ -5,25 +5,34 @@ heures en compte des milliers, dont l'écrasante majorité n'apporte rien au
 dessin. Les retirer au hasard, ou un sur deux, abîmerait les virages autant que
 les lignes droites.
 
-L'algorithme de Ramer-Douglas-Peucker écarte les points qui s'éloignent peu de
-la ligne joignant leurs voisins : les longues lignes droites fondent, les
-virages restent. Le nombre de points obtenu dépend du seuil de tolérance, qu'on
-ajuste par recherche dichotomique pour approcher la quantité demandée — d'où un
-résultat approximatif, mais fidèle à la forme.
+Le principe commun aux deux méthodes réunies ici : donner à chaque point un
+« poids », l'importance qu'il a dans le dessin. Ramener la trace à mille points,
+c'est alors garder les mille plus lourds — exactement, et en une seule passe.
+
+Deux façons de peser un point, selon ce qu'on demande :
+
+— Ramer-Douglas-Peucker mesure l'écart, en mètres, entre le point et la ligne
+  joignant ses voisins retenus. C'est la référence quand on raisonne en
+  tolérance (« lisser à moins de deux mètres »), mais son découpage dégénère
+  sur une longue ligne droite relevée au GPS : le coût y devient le carré du
+  nombre de points, soit plusieurs minutes pour dix mille.
+
+— Visvalingam-Whyatt mesure l'aire du triangle formé avec les voisins et retire
+  les points les plus plats, un tas maintenant l'ordre. Le coût est garanti,
+  quelle que soit la forme du tracé : c'est ce qui sert à ramener une trace à un
+  nombre de points voulu.
 """
 
 from __future__ import annotations
 
-from math import cos, radians
+from heapq import heapify, heappop, heappush
+from math import cos, inf, radians
 from typing import Sequence
 
 from .models import Point
 
 #: Mètres par degré de latitude ; suffisant pour comparer des écarts locaux.
 METRES_PAR_DEGRE = 111_320.0
-
-#: Nombre d'essais de la recherche dichotomique sur la tolérance.
-ESSAIS = 40
 
 
 def _projeter(points: Sequence[Point]) -> list[tuple[float, float]]:
@@ -55,65 +64,130 @@ def _distance_au_segment(point, debut, fin) -> float:
     return ((px - projx) ** 2 + (py - projy) ** 2) ** 0.5
 
 
-def _indices_conserves(plans, debut: int, fin: int, tolerance: float) -> list[int]:
-    """Indices à garder entre `debut` et `fin`, extrémités comprises."""
-    if fin <= debut + 1:
-        return [debut, fin] if fin > debut else [debut]
+def _poids(plans) -> list[float]:
+    """Écart auquel chaque point disparaîtrait, en mètres.
 
-    pire, ecart = debut, -1.0
-    for i in range(debut + 1, fin):
-        d = _distance_au_segment(plans[i], plans[debut], plans[fin])
-        if d > ecart:
-            pire, ecart = i, d
+    C'est le découpage de Douglas-Peucker mené jusqu'au bout, en notant au
+    passage l'écart qui a justifié chaque point. Les extrémités valent l'infini :
+    elles ne disparaissent jamais.
 
-    if ecart <= tolerance:
-        return [debut, fin]
+    Deux précautions :
+    — la pile est tenue à la main plutôt que par la récursion, qu'un tracé de
+      plusieurs milliers de points pourrait faire déborder ;
+    — le poids d'un point ne dépasse jamais celui du point qui l'a fait
+      apparaître, sans quoi un point pourrait « survivre » à son parent et le
+      classement ne correspondrait plus au découpage.
+    """
+    n = len(plans)
+    poids = [0.0] * n
+    poids[0] = poids[n - 1] = inf
 
-    gauche = _indices_conserves(plans, debut, pire, tolerance)
-    droite = _indices_conserves(plans, pire, fin, tolerance)
-    return gauche[:-1] + droite
+    pile = [(0, n - 1, inf)]
+    while pile:
+        debut, fin, plafond = pile.pop()
+        if fin <= debut + 1:
+            continue
+
+        pire, ecart = -1, -1.0
+        for i in range(debut + 1, fin):
+            d = _distance_au_segment(plans[i], plans[debut], plans[fin])
+            if d > ecart:
+                pire, ecart = i, d
+        if pire < 0:
+            continue
+
+        valeur = ecart if ecart < plafond else plafond
+        poids[pire] = valeur
+        pile.append((debut, pire, valeur))
+        pile.append((pire, fin, valeur))
+    return poids
 
 
 def douglas_peucker(points: Sequence[Point], tolerance: float) -> list[Point]:
     """Simplifie une trace en écartant les points à moins de `tolerance` mètres."""
     if len(points) < 3 or tolerance <= 0:
         return list(points)
-    plans = _projeter(points)
-    gardes = _indices_conserves(plans, 0, len(points) - 1, tolerance)
-    return [points[i] for i in gardes]
+    return [
+        point
+        for point, poids in zip(points, _poids(_projeter(points)))
+        if poids > tolerance
+    ]
+
+
+def _aire(plans, precedent: int, milieu: int, suivant: int) -> float:
+    """Aire du triangle formé par un point et ses deux voisins, en m².
+
+    Plus elle est petite, moins le point apporte au dessin : un point aligné
+    avec ses voisins donne une aire nulle.
+    """
+    (ax, ay), (bx, by), (cx, cy) = plans[precedent], plans[milieu], plans[suivant]
+    return abs((bx - ax) * (cy - ay) - (cx - ax) * (by - ay)) / 2
+
+
+def _poids_par_aire(plans) -> list[float]:
+    """Aire à laquelle chaque point disparaîtrait (Visvalingam-Whyatt).
+
+    On retire à chaque tour le point le plus plat, puis on recalcule ses deux
+    voisins. Le tas garantit un coût en n·log(n) quelle que soit la forme du
+    tracé, là où le découpage de Douglas-Peucker s'emballe : sur une trace
+    quasi rectiligne mais bruitée — une longue ligne droite relevée au GPS —
+    il dégénère et demandait plusieurs minutes pour dix mille points.
+
+    Comme pour le découpage, le poids ne décroît jamais : un point retiré après
+    un autre ne peut pas être jugé moins utile que lui, sans quoi les
+    simplifications successives ne s'emboîteraient plus.
+    """
+    n = len(plans)
+    poids = [0.0] * n
+    poids[0] = poids[n - 1] = inf
+
+    precedent = list(range(-1, n - 1))
+    suivant = list(range(1, n + 1))
+    version = [0] * n
+
+    tas = [(_aire(plans, i - 1, i, i + 1), i, 0) for i in range(1, n - 1)]
+    heapify(tas)
+
+    plancher = 0.0
+    while tas:
+        aire, i, marque = heappop(tas)
+        if marque != version[i]:
+            continue   # entrée périmée : le point a changé de voisins depuis
+
+        plancher = max(plancher, aire)
+        poids[i] = plancher
+
+        avant, apres = precedent[i], suivant[i]
+        suivant[avant] = apres
+        precedent[apres] = avant
+        for voisin in (avant, apres):
+            if 0 < voisin < n - 1:
+                version[voisin] += 1
+                heappush(
+                    tas,
+                    (
+                        _aire(plans, precedent[voisin], voisin, suivant[voisin]),
+                        voisin,
+                        version[voisin],
+                    ),
+                )
+    return poids
 
 
 def simplify_to(points: Sequence[Point], cible: int) -> list[Point]:
-    """Réduit la trace à environ `cible` points, en préservant sa forme.
+    """Réduit la trace à `cible` points, en préservant sa forme.
 
-    Le compte obtenu est approximatif : la tolérance qui donnerait exactement
-    le nombre demandé n'existe pas toujours. Le résultat n'excède jamais la
-    trace d'origine, et conserve toujours le départ et l'arrivée.
+    Le départ et l'arrivée sont toujours conservés, ainsi que l'ordre. Le
+    résultat n'excède jamais la trace d'origine.
     """
     if cible >= len(points) or len(points) < 3:
         return list(points)
     if cible < 2:
         cible = 2
 
-    # Bornes de la recherche : 0 conserve tout, la diagonale supprime tout.
-    plans = _projeter(points)
-    etendue = max(
-        max(x for x, _ in plans) - min(x for x, _ in plans),
-        max(y for _, y in plans) - min(y for _, y in plans),
-        1.0,
+    poids = _poids_par_aire(_projeter(points))
+    # Les `cible` points les plus lourds, remis dans l'ordre du parcours.
+    retenus = sorted(
+        sorted(range(len(points)), key=lambda i: -poids[i])[:cible]
     )
-    basse, haute = 0.0, etendue
-    meilleur = list(points)
-
-    for _ in range(ESSAIS):
-        milieu = (basse + haute) / 2
-        essai = douglas_peucker(points, milieu)
-        if len(essai) > cible:
-            basse = milieu
-        else:
-            haute = milieu
-            meilleur = essai
-        if len(essai) == cible:
-            return essai
-
-    return meilleur
+    return [points[i] for i in retenus]

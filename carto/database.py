@@ -594,7 +594,7 @@ class Database:
         )
 
     def decimate_track(self, track_id: int, cible: int) -> int | None:
-        """Crée une copie allégée d'une trace, ramenée à environ `cible` points.
+        """Crée une copie allégée d'une trace, ramenée à `cible` points.
 
         L'original n'est pas touché. Retourne l'identifiant de la copie, ou None
         si la trace est déjà plus courte que demandé.

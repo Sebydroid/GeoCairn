@@ -32,6 +32,40 @@ _RESERVES = {
 }
 
 
+#: Altitudes possibles à l'écriture d'un fichier. Une trace peut en porter deux
+#: — celle du fichier d'origine et celle calculée par l'IGN — mais le format GPX
+#: n'a qu'une balise `<ele>` : il faut choisir laquelle sortir. Les valeurs
+#: reprennent les noms des champs d'un point, et celles du profil.
+ELE_FICHIER = "ele"
+ELE_IGN = "ele_service"
+#: Celle du fichier d'origine, et à défaut celle de l'IGN.
+ELE_AUTO = "auto"
+
+#: Libellés présentés à l'utilisateur au moment de l'export.
+LIBELLES_ELEVATION = {
+    ELE_FICHIER: "Altitude d'origine de la trace",
+    ELE_IGN: "Altitude calculée par l'IGN",
+}
+
+
+def altitude_de(point: Point, source: str = ELE_AUTO) -> float | None:
+    """Altitude d'un point selon l'origine demandée."""
+    if source == ELE_FICHIER:
+        return point.ele
+    if source == ELE_IGN:
+        return point.ele_service
+    return point.ele if point.ele is not None else point.ele_service
+
+
+def altitudes_disponibles(points: Sequence[Point]) -> list[str]:
+    """Origines d'altitude réellement présentes dans une trace."""
+    return [
+        source
+        for source in (ELE_FICHIER, ELE_IGN)
+        if any(altitude_de(p, source) is not None for p in points)
+    ]
+
+
 def safe_filename(name: str, extension: str = ".gpx") -> str:
     """Transforme un nom de trace en nom de fichier valide sous Windows."""
     cleaned = re.sub(_FORBIDDEN, "_", name).strip(" .")
@@ -44,9 +78,16 @@ def safe_filename(name: str, extension: str = ".gpx") -> str:
 
 
 def build_gpx(
-    name: str, points: Sequence[Point], description: str = ""
+    name: str,
+    points: Sequence[Point],
+    description: str = "",
+    elevation: str = ELE_AUTO,
 ) -> ET.ElementTree:
-    """Construit l'arbre XML GPX d'une trace."""
+    """Construit l'arbre XML GPX d'une trace.
+
+    `elevation` désigne l'altitude à écrire : celle du fichier d'origine, celle
+    de l'IGN, ou la première des deux qui existe.
+    """
     ET.register_namespace("", GPX_NS)
     ET.register_namespace("xsi", XSI_NS)
 
@@ -90,11 +131,10 @@ def build_gpx(
             f"{{{GPX_NS}}}trkpt",
             {"lat": f"{point.lat:.9f}", "lon": f"{point.lon:.9f}"},
         )
-        # Le format ne prévoit qu'une altitude : celle du fichier d'origine si
-        # elle existe, sinon celle calculée par l'IGN. Sans ce recours, une
-        # trace dessinée à la main ressortait sans la moindre altitude, alors
-        # qu'on venait de la lui faire calculer.
-        altitude = point.ele if point.ele is not None else point.ele_service
+        # Le format ne prévoit qu'une altitude. Sans ce choix, une trace
+        # dessinée à la main ressortait sans la moindre altitude, alors qu'on
+        # venait de la lui faire calculer.
+        altitude = altitude_de(point, elevation)
         if altitude is not None:
             ET.SubElement(trkpt, f"{{{GPX_NS}}}ele").text = f"{altitude:.6f}"
         if point.time:
@@ -110,11 +150,12 @@ def write_gpx(
     name: str,
     points: Sequence[Point],
     description: str = "",
+    elevation: str = ELE_AUTO,
 ) -> Path:
     """Écrit la trace dans un fichier GPX. Retourne le chemin écrit."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tree = build_gpx(name, points, description)
+    tree = build_gpx(name, points, description, elevation)
     tree.write(path, encoding="UTF-8", xml_declaration=True)
     return path
 

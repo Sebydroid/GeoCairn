@@ -27,7 +27,10 @@ from ..editor import DraftTrack
 from ..elevation import ElevationError, fetch_elevations
 from ..geo import bounds, format_length, total_length
 from ..gpx import (
+    ELE_AUTO,
+    LIBELLES_ELEVATION,
     GpxParseError,
+    altitudes_disponibles,
     count_waypoints,
     parse_gpx,
     safe_filename,
@@ -815,7 +818,7 @@ class MainWindow(QMainWindow):
                 self,
                 f"Décimer « {track.name} »",
                 f"Cette trace compte {track.point_count} points.\n"
-                "Nombre de points souhaité (le résultat sera approchant) :",
+                "Nombre de points à conserver :",
                 propose,
                 2,
                 track.point_count - 1,
@@ -1229,10 +1232,42 @@ class MainWindow(QMainWindow):
             return
         self.export_track(int(ident))
 
-    def export_track(self, track_id: int, path: str | None = None) -> str | None:
+    def choose_elevation_source(self, points) -> str | None:
+        """Demande quelle altitude écrire, quand la trace en porte deux.
+
+        Une trace importée puis complétée par le service de l'IGN porte deux
+        altitudes ; le format GPX n'en accepte qu'une. La question n'est posée
+        que s'il y a réellement à choisir. Retourne None si l'utilisateur
+        renonce.
+        """
+        disponibles = altitudes_disponibles(points)
+        if len(disponibles) < 2:
+            return ELE_AUTO
+
+        libelles = [LIBELLES_ELEVATION[source] for source in disponibles]
+        choix, accepte = QInputDialog.getItem(
+            self,
+            "Altitude à exporter",
+            "Cette trace porte deux altitudes, et le format GPX n'en accepte\n"
+            "qu'une. Laquelle écrire dans le fichier ?",
+            libelles,
+            0,
+            False,
+        )
+        if not accepte:
+            return None
+        return disponibles[libelles.index(choix)]
+
+    def export_track(
+        self,
+        track_id: int,
+        path: str | None = None,
+        elevation: str | None = None,
+    ) -> str | None:
         """Écrit une trace de la base dans un fichier GPX.
 
-        `path` sert aux tests ; sans lui, une boîte de dialogue est ouverte.
+        `path` et `elevation` servent aux tests ; sans eux, l'utilisateur est
+        interrogé.
         """
         track = self.db.get_track(track_id, with_points=True)
         if track is None:
@@ -1245,6 +1280,13 @@ class MainWindow(QMainWindow):
             )
             return None
 
+        # Le choix de l'altitude vient avant celui du fichier : le dernier geste
+        # reste ainsi le bouton « Enregistrer » de la boîte de dialogue.
+        if elevation is None:
+            elevation = self.choose_elevation_source(track.points)
+            if elevation is None:
+                return None
+
         if path is None:
             path, _filter = QFileDialog.getSaveFileName(
                 self,
@@ -1256,15 +1298,20 @@ class MainWindow(QMainWindow):
                 return None
 
         try:
-            written = write_gpx(path, track.name, track.points, track.description)
+            written = write_gpx(
+                path, track.name, track.points, track.description, elevation
+            )
         except OSError as exc:
             QMessageBox.critical(
                 self, "Échec de l'export", f"Impossible d'écrire le fichier :\n{exc}"
             )
             return None
 
+        precision = ""
+        if elevation in LIBELLES_ELEVATION:
+            precision = f" ({LIBELLES_ELEVATION[elevation].lower()})"
         self.status_label.setText(
-            f"Trace « {track.name} » exportée vers {written}."
+            f"Trace « {track.name} » exportée vers {written}{precision}."
         )
         return str(written)
 

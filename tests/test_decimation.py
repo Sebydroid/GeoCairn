@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import math
+import time
+
 import pytest
 from PyQt6.QtWidgets import QInputDialog, QMessageBox
 
@@ -9,7 +12,12 @@ from carto.app import create_app
 from carto.database import Database
 from carto.geo import total_length
 from carto.models import Point
-from carto.simplify import douglas_peucker, simplify_to
+from carto.simplify import (
+    _distance_au_segment,
+    _projeter,
+    douglas_peucker,
+    simplify_to,
+)
 from carto.ui.main_window import MainWindow
 
 
@@ -131,6 +139,84 @@ def test_altitude_et_horodatage_suivent():
 
     assert resultat[0].ele == pytest.approx(70.0)
     assert resultat[0].time == "2026-08-10T09:00:00Z"
+
+
+# ------------------------------------- classement des points par poids
+
+
+def test_le_compte_demande_est_exact():
+    """Le classement par poids donne le nombre voulu, pas une approximation."""
+    points = bruitee(500)
+
+    for cible in (2, 10, 137, 499):
+        assert len(simplify_to(points, cible)) == cible
+
+
+def test_une_cible_plus_grande_contient_la_plus_petite():
+    """Les points retenus s'emboîtent : c'est ce qui rend le classement juste."""
+    points = bruitee(300)
+
+    petite = {p.as_tuple() for p in simplify_to(points, 20)}
+    grande = {p.as_tuple() for p in simplify_to(points, 60)}
+
+    assert petite <= grande
+
+
+def ecart_maximal(origine, allegee) -> float:
+    """Distance maximale entre les points d'origine et le tracé allégé, en m."""
+    plans_origine = _projeter(origine)
+    plans_allegee = _projeter(allegee)
+    pire = 0.0
+    for point in plans_origine:
+        proche = min(
+            _distance_au_segment(point, plans_allegee[i], plans_allegee[i + 1])
+            for i in range(len(plans_allegee) - 1)
+        )
+        pire = max(pire, proche)
+    return pire
+
+
+def test_la_forme_est_preservee():
+    """Alléger ne doit pas déplacer le tracé : c'est tout l'enjeu.
+
+    Les virages d'une trace de mille points doivent rester reconnaissables une
+    fois ramenée au dixième.
+    """
+    points = [
+        Point(48.0 + 0.01 * math.sin(i / 50), 1.0 + i / 5000) for i in range(1000)
+    ]
+
+    allegee = simplify_to(points, 100)
+
+    # Le tracé s'étend sur plusieurs kilomètres : quelques mètres d'écart ne se
+    # voient pas à l'écran.
+    assert ecart_maximal(points, allegee) < 10.0
+
+
+def test_une_trace_tres_longue_ne_deborde_pas_la_pile():
+    """Régression : le découpage récursif pouvait dépasser la profondeur permise."""
+    points = ligne_droite(20000)
+
+    resultat = douglas_peucker(points, tolerance=0.5)
+
+    assert len(resultat) == 2
+
+
+def test_la_decimation_d_une_trace_dense_reste_rapide():
+    """Régression : quarante passes de l'algorithme figeaient l'interface.
+
+    Décimer vingt mille points demandait une quinzaine de secondes, sans
+    indication ni moyen d'interrompre. Le seuil est large : il ne mesure pas la
+    machine, il signale le retour de la recherche par essais successifs.
+    """
+    points = bruitee(20000)
+
+    debut = time.perf_counter()
+    resultat = simplify_to(points, 2000)
+    ecoule = time.perf_counter() - debut
+
+    assert len(resultat) == 2000
+    assert ecoule < 3.0, f"décimation de 20 000 points : {ecoule:.1f} s"
 
 
 # ----------------------------------------------------- en base

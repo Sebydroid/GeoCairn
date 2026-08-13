@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import QMessageBox
 from carto.app import create_app
 from carto.database import Database
 from carto.geo import distance, total_length
-from carto.gpx import coordonnee_valide, parse_gpx, safe_filename
+from carto.gpx import ELE_AUTO, coordonnee_valide, parse_gpx, safe_filename
 from carto.models import Point
 from carto.ui.icons import BULB_OFF, BULB_ON, bulb_with
 from carto.ui.main_window import MainWindow
@@ -39,9 +39,25 @@ def qapp():
     app.processEvents()
 
 
+@pytest.fixture(scope="module")
+def _fenetre(qapp, tmp_path_factory):
+    """Fenêtre partagée par tout le fichier.
+
+    Chaque fenêtre embarque un moteur web complet : en construire une par test
+    épuise les ressources de QtWebEngine, et la suite entière finit par mourir
+    plusieurs fichiers plus loin, sans le moindre rapport avec le test fautif.
+    """
+    database = Database(tmp_path_factory.mktemp("robustesse") / "carto.db")
+    win = MainWindow(db=database)
+    yield win
+    # Fermer pour de bon : une fenêtre laissée vivante retient le moteur web,
+    # et l'interpréteur ne rend jamais la main.
+    win.close()
+
+
 @pytest.fixture
-def window(qapp, db, monkeypatch):
-    """Fenêtre sur une base vierge, dialogues neutralisés."""
+def window(_fenetre, monkeypatch):
+    """Bibliothèque vide, brouillon vide, dialogues neutralisés."""
     monkeypatch.setattr(
         QMessageBox, "question",
         staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes),
@@ -50,9 +66,18 @@ def window(qapp, db, monkeypatch):
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: None))
 
-    win = MainWindow(db=db)
-    yield win
-    win._closing = True
+    for track in _fenetre.db.list_tracks(None):
+        _fenetre.db.delete_track(track.id)
+    for folder in _fenetre.db.list_folders(None):
+        _fenetre.db.delete_folder(folder.id)
+    _fenetre.draft.reset()
+    _fenetre.set_edit_mode(False)
+    _fenetre.map_view.clear_draft()
+    _fenetre.map_view.clear_tracks()
+    _fenetre.visible_tracks.clear()
+    _fenetre.tree_panel.refresh()
+    _fenetre._update_draft_actions()
+    yield _fenetre
 
 
 # ------------------------- trace supprimée pendant sa modification
@@ -406,13 +431,15 @@ def test_l_altitude_ign_survit_a_l_export(window, tmp_path):
 
 
 def test_l_altitude_du_fichier_reste_prioritaire(window, tmp_path):
-    """Quand les deux existent, celle du fichier d'origine fait foi."""
+    """Sans choix explicite, celle du fichier d'origine fait foi."""
     points = [Point(48.930, 1.440, 10.0), Point(48.931, 1.442, 20.0)]
     track_id = window.db.create_track("Importée", points=points)
     window.db.set_service_elevations(track_id, [999.0, 999.0])
     window.tree_panel.refresh()
 
-    chemin = window.export_track(track_id, path=str(tmp_path / "sortie.gpx"))
+    chemin = window.export_track(
+        track_id, path=str(tmp_path / "sortie.gpx"), elevation=ELE_AUTO
+    )
 
     relue = parse_gpx(chemin)[0]
     assert [p.ele for p in relue.points] == [10.0, 20.0]

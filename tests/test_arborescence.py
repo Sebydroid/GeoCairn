@@ -44,6 +44,15 @@ def panel(qapp, db):
 
 @pytest.fixture
 def window(qapp, db):
+    """Une fenêtre par test, chacune avec son moteur web.
+
+    ATTENTION : ce fichier est à la limite de ce que QtWebEngine supporte dans
+    un même processus. Quelques tests de plus qui demandent cette fixture, et
+    la suite entière meurt — sans message, et plusieurs fichiers plus loin, ce
+    qui rend la cause introuvable. Pour de nouveaux tests, préférer une fenêtre
+    partagée par le fichier, comme dans `test_export_altitude.py` ou
+    `test_robustesse.py`.
+    """
     win = MainWindow(db=db)
     yield win
     win.close()

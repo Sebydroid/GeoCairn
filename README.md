@@ -396,10 +396,11 @@ compte des milliers, difficiles à retoucher. **Décimer la trace…** (clic dro
 rappelle le nombre de points actuel et demande combien en garder, puis crée une
 copie allégée suffixée `-décimé`. L'originale n'est pas touchée.
 
-Le tri n'est pas fait au hasard ni un point sur deux : l'algorithme de
-Ramer-Douglas-Peucker écarte les points qui s'écartent peu de la ligne joignant
-leurs voisins. Les longues lignes droites fondent, les virages restent. Le
-compte obtenu est donc **approchant** et non exact.
+Le tri n'est pas fait au hasard ni un point sur deux : chaque point reçoit un
+poids — l'aire du triangle qu'il forme avec ses voisins — et seuls les plus
+lourds sont conservés. Les longues lignes droites fondent, les virages restent,
+et le compte demandé est respecté exactement. Le départ et l'arrivée ne sont
+jamais retirés.
 
 ### Importer et exporter
 
@@ -410,6 +411,10 @@ compte obtenu est donc **approchant** et non exact.
 - Clic droit sur une trace → **Exporter en GPX…**, ou menu *Fichier*. Le fichier
   produit est du GPX 1.1 standard, relisible par les autres logiciels de
   randonnée.
+- Le format GPX n'accepte qu'une altitude par point. Quand la trace en porte
+  deux — celle de son fichier d'origine et celle calculée par l'IGN —, le
+  logiciel demande laquelle écrire avant d'ouvrir la boîte d'enregistrement.
+  S'il n'y en a qu'une, il ne demande rien et l'écrit.
 
 **Points d'intérêt non gérés.** Un GPX ne contenant que des `<wpt>` (relevé de
 points remarquables, sans itinéraire) n'a rien à importer : Carto l'explique au
