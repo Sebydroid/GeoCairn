@@ -23,6 +23,12 @@ python main.py
 pytest tests/
 ```
 
+Les tests ne touchent jamais à Internet : le service altimétrique est coupé
+d'office, ceux qui le concernent fournissant leur propre transport simulé. Les
+scripts `tests/check_*.py` sont des diagnostics à lancer à la main, hors
+pytest : ils dépendent du réseau, d'une construction préalable ou de la
+machine.
+
 ## Organisation du code
 
 | Chemin | Rôle |
@@ -44,6 +50,7 @@ pytest tests/
 | `build.py` | Construction, allègement, archive, installeur, contrôle |
 | `installateur.iss` | Recette de l'installeur `.exe` (Inno Setup) |
 | `outils/installer.ps1` | Installation sans outil supplémentaire |
+| `outils/livraison.py` | Règles d'allègement, vérifiées par les tests |
 | `carto/ui/profile_panel.py` | Profil sous la carte : altitude ou vitesse |
 | `carto/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
 | `carto/elevation.py` | Altitude des points par le service IGN |
@@ -116,15 +123,23 @@ fonctionnalités ». Aucun droit d'administrateur n'est demandé.
 `Desinstaller.bat` fait l'inverse, et **demande** avant de toucher aux traces.
 
 **Installeur `.exe` classique** : `python build.py --installateur` produit
-`dist-installeur\Carto-1.0.0-installation.exe`. Il faut pour cela Inno Setup,
-outil gratuit à installer une seule fois :
+`dist-installeur\Carto-1.0.0-installation.exe` (92 Mo — mieux compressé que
+l'archive ZIP). Il faut pour cela Inno Setup, outil gratuit à installer une
+seule fois :
 
 ```bash
 winget install JRSoftware.InnoSetup
 ```
 
 Sans lui, la construction le signale et se poursuit : l'archive et son
-`Installer.bat` restent utilisables.
+`Installer.bat` restent utilisables. Inno Setup s'installe indifféremment pour
+la machine ou pour le seul utilisateur — winget choisit le second, dans
+`AppData` : les deux emplacements sont explorés, et le registre sert de dernier
+recours.
+
+`python tests/check_installateur.py` vérifie l'installeur produit de bout en
+bout : installation silencieuse dans un dossier temporaire, autotest du
+programme installé, désinstallation, puis contrôle que plus rien ne subsiste.
 
 ### Mettre à jour
 

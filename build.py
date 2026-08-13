@@ -119,8 +119,38 @@ def controler(livraison: Path) -> bool:
         errors="replace",
         timeout=180,
     )
-    afficher(((resultat.stdout or "") + (resultat.stderr or "")).strip())
+    sortie = ((resultat.stdout or "") + (resultat.stderr or "")).strip()
+    afficher(sortie)
+
+    plaintes = reperer_plaintes(sortie)
+    if plaintes:
+        afficher("\nle programme se plaint de sa livraison :")
+        for ligne in plaintes:
+            afficher(f"  {ligne}")
+        return False
+
     return resultat.returncode == 0
+
+
+#: Traces d'une livraison incomplète que le programme signale sans pour autant
+#: s'arrêter : sans cela, une ressource oubliée passerait inaperçue.
+PLAINTES = (
+    "could not find",
+    "will not be correct",
+    "failed to",
+    "no such file",
+    "introuvable",
+    "qt.qpa",
+)
+
+
+def reperer_plaintes(sortie: str) -> list[str]:
+    """Lignes de la sortie qui trahissent une livraison bancale."""
+    return [
+        ligne.strip()
+        for ligne in sortie.splitlines()
+        if any(motif in ligne.lower() for motif in PLAINTES)
+    ]
 
 
 def version() -> str:
@@ -155,17 +185,55 @@ def archiver(livraison: Path) -> Path:
 
 
 def trouver_iscc() -> Path | None:
-    """Compilateur Inno Setup, s'il est installé."""
-    candidats = [
-        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
-        / "Inno Setup 6" / "ISCC.exe",
-        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
-        / "Inno Setup 6" / "ISCC.exe",
+    """Compilateur Inno Setup, s'il est installé.
+
+    L'outil s'installe aussi bien pour la machine que pour le seul utilisateur
+    — c'est le cas d'une installation par winget, qui le dépose alors dans
+    AppData. Les deux emplacements sont donc explorés, et le registre sert de
+    dernier recours.
+    """
+    racines = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs",
+        Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
     ]
+    candidats = []
     trouve = shutil.which("iscc")
     if trouve:
-        candidats.insert(0, Path(trouve))
+        candidats.append(Path(trouve))
+    for racine in racines:
+        for version in ("Inno Setup 6", "Inno Setup 5"):
+            candidats.append(racine / version / "ISCC.exe")
+
+    candidats.extend(_iscc_depuis_le_registre())
     return next((c for c in candidats if c.is_file()), None)
+
+
+def _iscc_depuis_le_registre() -> list[Path]:
+    """Emplacements déclarés par le programme d'installation d'Inno Setup."""
+    try:
+        import winreg
+    except ImportError:
+        return []
+
+    trouves = []
+    cles = [
+        (winreg.HKEY_CURRENT_USER,
+         r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1"),
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup 6_is1"),
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+         r"\Inno Setup 6_is1"),
+    ]
+    for racine, chemin in cles:
+        try:
+            with winreg.OpenKey(racine, chemin) as cle:
+                dossier, _type = winreg.QueryValueEx(cle, "InstallLocation")
+                trouves.append(Path(dossier) / "ISCC.exe")
+        except OSError:
+            continue
+    return trouves
 
 
 def construire_installateur(livraison: Path) -> bool:

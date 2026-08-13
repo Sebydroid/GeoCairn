@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Recette de construction de l'exécutable Windows.
 
+    python build.py            (recommandé : PATH assaini et contrôle)
     pyinstaller carto.spec --noconfirm
 
 Le mode « un dossier » est retenu plutôt que le fichier unique : QtWebEngine
@@ -10,11 +11,18 @@ temporaire à chaque lancement — long au démarrage et source de pannes.
 
 Le dossier produit, dist/Carto/, se remplace tel quel lors d'une mise à jour :
 aucune donnée utilisateur ne s'y trouve, elles vivent dans AppData.
+
+Les règles d'allègement sont dans outils/livraison.py, pour être vérifiables
+par les tests.
 """
 
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_data_files
+
+sys.path.insert(0, os.path.join(SPECPATH, "outils"))
+from livraison import est_etranger, module_inutile, ressource_retenue  # noqa: E402
 
 # CARTO_CONSOLE=1 produit une variante qui garde une console : indispensable
 # pour lire une erreur de démarrage, que la version fenêtrée avale.
@@ -24,7 +32,10 @@ datas = [
     # Carte Leaflet, feuille de style et page : indispensables au démarrage.
     ("carto/resources", "carto/resources"),
 ]
-datas += collect_data_files("PyQt6", includes=["Qt6/resources/*", "Qt6/translations/qtwebengine_locales/*"])
+datas += collect_data_files(
+    "PyQt6",
+    includes=["Qt6/resources/*", "Qt6/translations/qtwebengine_locales/*"],
+)
 
 a = Analysis(
     ["main.py"],
@@ -44,108 +55,55 @@ a = Analysis(
     noarchive=False,
 )
 
-#: Familles de modules Qt sans rapport avec l'application. Le moteur de carte
-#: a besoin de Qml, Quick et QuickWidgets ; le reste de la galaxie Qt Quick —
-#: la 3D, les contrôles, les dialogues — ne sert jamais ici.
-MODULES_INUTILES = (
-    "qt6quick3d", "qt6quickcontrols2", "qt6quickdialogs", "qt6quicktimeline",
-    "qt6quickparticles", "qt6quickeffects", "qt6quicktest",
-    "qt6quickvectorimage", "qt6quicktemplates2", "qt6quickshapes",
-    "qt6multimedia", "qt6spatialaudio", "qt6sensors", "qt6serialport",
-    "qt6texttospeech", "qt6remoteobjects", "qt6statemachine", "qt6test",
-    "qt6pdf", "qt6shadertools", "qt6websockets", "qt6charts", "qt6designer",
-    "qt6help", "qt6bluetooth", "qt6nfc", "qt6svg", "qt6datavisualization",
-)
 
-#: Langues conservées pour l'interface et le moteur de carte. Les cinquante
-#: autres pèsent une cinquantaine de mégaoctets pour rien.
-LANGUES = ("fr", "en", "en-us", "en-gb")
-
-
-def _langue_retenue(nom: str) -> bool:
-    """Vrai si ce fichier de traduction concerne une langue conservée."""
-    base = os.path.splitext(nom)[0].lower()
-    for separateur in ("_", "-"):
-        if separateur in base:
-            base = base.split(separateur, 1)[1]
-            break
-    return base in LANGUES or base.split("-")[0] in ("fr", "en")
+def _poids(source) -> float:
+    try:
+        return os.path.getsize(source) / 1024 / 1024
+    except OSError:
+        return 0.0
 
 
 def _alleger(donnees):
-    """Retire les ressources que l'application n'ouvre jamais.
-
-    Les outils de développement web de Chromium représentent à eux seuls plus
-    de quatre-vingts mégaoctets : ce sont les panneaux d'inspection du
-    navigateur, auxquels Carto ne donne aucun accès.
-    """
+    """Retire les ressources que l'application n'ouvre jamais."""
     retenus = []
     retire = 0.0
     for entree in donnees:
-        destination, source = entree[0], entree[1]
-        nom = os.path.basename(destination).lower()
-        chemin = destination.replace("\\", "/").lower()
-
-        indesirable = (
-            "qtwebengine_devtools_resources" in nom
-            or ("translations/" in chemin and not _langue_retenue(nom))
-            or ("qtwebengine_locales/" in chemin and not _langue_retenue(nom))
-        )
-        if indesirable:
-            try:
-                retire += os.path.getsize(source) / 1024 / 1024
-            except OSError:
-                pass
-            continue
-        retenus.append(entree)
-
+        if ressource_retenue(entree[0]):
+            retenus.append(entree)
+        else:
+            retire += _poids(entree[1])
     print(f"[carto.spec] ressources allégées : {retire:.0f} Mo écartés")
     return retenus
 
 
 def _ecarter(binaires):
-    """Retire les bibliothèques ramassées à côté, qui font tomber Qt.
+    """Retire les bibliothèques étrangères et les modules Qt inutilisés.
 
-    PyInstaller suit les dépendances en explorant le PATH. Sur une machine où
-    Anaconda est installé, il embarque ses bibliothèques ICU sous les noms
-    génériques `icuuc.dll` et `icudt58.dll`. Qt6Core, qui attend une version
-    bien plus récente, les trouve alors dans le dossier de l'application et
-    échoue au chargement avec « la procédure spécifiée est introuvable ».
-
-    Rien de ce qui vient d'une autre distribution Python n'a sa place ici :
-    l'application n'a besoin que de son interpréteur, de PyQt6 et de la
-    bibliothèque standard.
+    Les premières viennent d'une autre distribution Python trouvée sur le
+    PATH ; sur cette machine, les bibliothèques ICU d'Anaconda empêchaient Qt
+    de démarrer. build.py assainit le PATH en amont, ce filtre reste en second
+    rideau pour une construction lancée autrement.
     """
-    ecartes = []
     retenus = []
+    etrangers = []
     gagne = 0.0
     for entree in binaires:
         destination, source = entree[0], entree[1]
-        nom = os.path.basename(destination).lower()
-        chemin = str(source).lower()
-        etranger = (
-            nom.startswith("icu")
-            or "anaconda" in chemin
-            or "miniconda" in chemin
-        )
-        inutile = nom.startswith(MODULES_INUTILES)
-        if etranger or inutile:
-            ecartes.append((entree, "étranger" if etranger else "inutile"))
-            try:
-                gagne += os.path.getsize(source) / 1024 / 1024
-            except OSError:
-                pass
+        if est_etranger(source) or est_etranger(destination):
+            etrangers.append(entree)
+            gagne += _poids(source)
+        elif module_inutile(destination):
+            gagne += _poids(source)
         else:
             retenus.append(entree)
 
-    etrangers = sum(1 for _e, motif in ecartes if motif == "étranger")
+    inutiles = len(binaires) - len(retenus) - len(etrangers)
     print(
-        f"[carto.spec] bibliothèques écartées : {etrangers} étrangères, "
-        f"{len(ecartes) - etrangers} modules inutilisés ({gagne:.0f} Mo)"
+        f"[carto.spec] bibliothèques écartées : {len(etrangers)} étrangères, "
+        f"{inutiles} modules inutilisés ({gagne:.0f} Mo)"
     )
-    for entree, motif in ecartes:
-        if motif == "étranger":
-            print(f"[carto.spec] étranger : {entree[0]}  <-  {entree[1]}")
+    for entree in etrangers:
+        print(f"[carto.spec] étranger : {entree[0]}  <-  {entree[1]}")
     return retenus
 
 

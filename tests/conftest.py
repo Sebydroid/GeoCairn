@@ -20,6 +20,22 @@ from carto.database import Database  # noqa: E402
 from carto.models import Point  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def sans_reseau(monkeypatch):
+    """Aucun test ne doit dépendre du service altimétrique de l'IGN.
+
+    Dessiner un point demande son altitude en arrière-plan : sans ce garde-fou,
+    la simple saisie d'une trace dans un test lançait de vraies requêtes vers
+    Internet. La suite devenait tributaire d'un service extérieur, et pouvait
+    s'y attarder. Les tests qui vérifient la récupération d'altitude
+    fournissent leur propre transport et ne sont pas concernés.
+    """
+    def refuser(_url):
+        raise OSError("réseau volontairement coupé pendant les tests")
+
+    monkeypatch.setattr("carto.elevation._default_fetch", refuser)
+
+
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     """Base SQLite isolée dans un répertoire temporaire."""

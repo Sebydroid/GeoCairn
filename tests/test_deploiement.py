@@ -159,8 +159,9 @@ def test_la_recette_de_construction_existe():
     contenu = spec.read_text(encoding="utf-8")
     # Les ressources doivent être embarquées, sans quoi la carte serait vide.
     assert "carto/resources" in contenu
-    # Le filtre qui écarte les bibliothèques étrangères doit rester en place.
-    assert "icu" in contenu.lower()
+    # Les règles d'allègement sont vérifiées par tests/test_livraison.py ;
+    # la recette doit s'y référer plutôt que d'en tenir sa propre version.
+    assert "from livraison import" in contenu
 
 
 def test_l_autotest_est_disponible():
@@ -178,40 +179,6 @@ def test_l_autotest_verifie_l_affichage_d_une_trace():
 
     source = Path(app.__file__).read_text(encoding="utf-8")
     assert "trace affichée sur la carte" in source
-
-
-# ------------------------------------------------------ allègement
-
-
-def test_la_recette_ecarte_les_outils_de_developpement_web():
-    """Les panneaux d'inspection de Chromium pèsent plus de 80 Mo."""
-    contenu = (Path(config.install_dir()) / "carto.spec").read_text(encoding="utf-8")
-    assert "qtwebengine_devtools_resources" in contenu
-
-
-def test_la_recette_ne_garde_que_quelques_langues():
-    contenu = (Path(config.install_dir()) / "carto.spec").read_text(encoding="utf-8")
-    assert "LANGUES" in contenu
-    assert "qtwebengine_locales" in contenu
-
-
-def test_la_recette_conserve_les_modules_necessaires_a_la_carte():
-    """Le moteur de carte s'appuie sur Qml, Quick et WebChannel."""
-    from carto import __file__ as source_carto
-
-    spec = Path(source_carto).resolve().parent.parent / "carto.spec"
-    contenu = spec.read_text(encoding="utf-8")
-
-    debut = contenu.index("MODULES_INUTILES")
-    fin = contenu.index(")", debut)
-    ecartes = contenu[debut:fin].lower()
-
-    for indispensable in ("qt6qml\"", "qt6quick\"", "qt6webchannel\"",
-                          "qt6webengine", "qt6core", "qt6gui", "qt6widgets",
-                          "qt6network", "qt6positioning", "qt6opengl"):
-        assert indispensable not in ecartes, (
-            f"{indispensable} est nécessaire au moteur de carte"
-        )
 
 
 # --------------------------------------------------- installation
