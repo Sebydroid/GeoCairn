@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 from typing import Sequence
 
@@ -89,8 +90,13 @@ def build_gpx(
             f"{{{GPX_NS}}}trkpt",
             {"lat": f"{point.lat:.9f}", "lon": f"{point.lon:.9f}"},
         )
-        if point.ele is not None:
-            ET.SubElement(trkpt, f"{{{GPX_NS}}}ele").text = f"{point.ele:.6f}"
+        # Le format ne prévoit qu'une altitude : celle du fichier d'origine si
+        # elle existe, sinon celle calculée par l'IGN. Sans ce recours, une
+        # trace dessinée à la main ressortait sans la moindre altitude, alors
+        # qu'on venait de la lui faire calculer.
+        altitude = point.ele if point.ele is not None else point.ele_service
+        if altitude is not None:
+            ET.SubElement(trkpt, f"{{{GPX_NS}}}ele").text = f"{altitude:.6f}"
         if point.time:
             ET.SubElement(trkpt, f"{{{GPX_NS}}}time").text = point.time
 
@@ -127,6 +133,8 @@ class GpxTrack:
     name: str
     points: list[Point] = field(default_factory=list)
     description: str = ""
+    #: Points écartés du fichier : coordonnées absentes ou aberrantes.
+    ignores: int = 0
 
 
 def _local(tag: str) -> str:
@@ -150,12 +158,41 @@ def _child_text(element, name: str) -> str:
     return (child.text or "").strip() if child is not None else ""
 
 
+#: Bornes des coordonnées, telles que les fixe le schéma GPX 1.1.
+LAT_MAX = 90.0
+LON_MAX = 180.0
+
+
+def coordonnee_valide(lat: float, lon: float) -> bool:
+    """Vrai si le couple désigne un point réel du globe.
+
+    Un fichier abîmé peut porter « NaN », « 1e999 » ou une latitude de 195° :
+    ces valeurs ne sont pas seulement fausses, elles sont contagieuses. La base
+    refuse d'enregistrer un NaN, et le calcul de distance s'interrompt sur un
+    infini — au beau milieu d'un signal Qt, ce qui emporte toute l'application,
+    à l'import comme à chaque démarrage suivant.
+    """
+    return (
+        isfinite(lat)
+        and isfinite(lon)
+        and -LAT_MAX <= lat <= LAT_MAX
+        and -LON_MAX <= lon <= LON_MAX
+    )
+
+
 def _read_point(element) -> Point | None:
-    """Convertit un <trkpt>/<rtept> ; retourne None si les coordonnées manquent."""
+    """Convertit un <trkpt>/<rtept> ; retourne None si les coordonnées manquent.
+
+    Les coordonnées aberrantes sont écartées de la même façon : mieux vaut une
+    trace amputée d'un point qu'un logiciel qui ne se lance plus.
+    """
     try:
         lat = float(element.get("lat"))
         lon = float(element.get("lon"))
     except (TypeError, ValueError):
+        return None
+
+    if not coordonnee_valide(lat, lon):
         return None
 
     ele_text = _child_text(element, "ele")
@@ -167,14 +204,18 @@ def _read_point(element) -> Point | None:
     return Point(lat, lon, ele, _child_text(element, "time") or None)
 
 
-def _collect_points(container, point_tag: str) -> list[Point]:
+def _collect_points(container, point_tag: str) -> tuple[list[Point], int]:
+    """Points lisibles du conteneur, et nombre de points écartés."""
     points = []
+    ignores = 0
     for element in container.iter():
         if _local(element.tag) == point_tag:
             point = _read_point(element)
-            if point is not None:
+            if point is None:
+                ignores += 1
+            else:
                 points.append(point)
-    return points
+    return (points, ignores)
 
 
 def _read_root(path: Path):
@@ -218,9 +259,9 @@ def parse_gpx(path: str | Path) -> list[GpxTrack]:
     for element in root:
         tag = _local(element.tag)
         if tag == "trk":
-            points = _collect_points(element, "trkpt")
+            points, ignores = _collect_points(element, "trkpt")
         elif tag == "rte":
-            points = _collect_points(element, "rtept")
+            points, ignores = _collect_points(element, "rtept")
         else:
             continue
         if not points:
@@ -230,6 +271,7 @@ def parse_gpx(path: str | Path) -> list[GpxTrack]:
                 name=_child_text(element, "name") or path.stem,
                 points=points,
                 description=_child_text(element, "desc"),
+                ignores=ignores,
             )
         )
     return tracks

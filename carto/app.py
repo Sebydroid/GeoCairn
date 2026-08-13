@@ -38,9 +38,10 @@ def run(argv: list[str] | None = None) -> int:
 
     app = create_app(argv)
 
-    # Une base illisible (fichier abîmé, disque plein, dossier verrouillé) ne
-    # doit pas faire disparaître le programme sans un mot : la version compilée
-    # n'a pas de console où lire la moindre explication.
+    # Une base illisible ou protégée en écriture (fichier abîmé, restauré d'une
+    # sauvegarde, disque plein, dossier verrouillé) ne doit pas faire
+    # disparaître le programme sans un mot : la version compilée n'a pas de
+    # console où lire la moindre explication.
     try:
         db = Database()
     except (sqlite3.Error, OSError) as exc:
@@ -48,7 +49,9 @@ def run(argv: list[str] | None = None) -> int:
             None,
             f"{APP_NAME} — base de données inaccessible",
             f"Impossible d'ouvrir la bibliothèque de traces :\n{exc}\n\n"
-            f"Fichier concerné :\n{db_path()}",
+            f"Fichier concerné :\n{db_path()}\n\n"
+            "Vérifiez que ce fichier n'est pas en lecture seule et qu'aucun "
+            "autre programme ne le retient.",
         )
         return 1
 

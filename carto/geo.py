@@ -13,13 +13,23 @@ EARTH_RADIUS_M = 6371008.8
 
 
 def distance(a: Point, b: Point) -> float:
-    """Distance orthodromique entre deux points, en mètres (formule de haversine)."""
-    lat1, lon1 = radians(a.lat), radians(a.lon)
-    lat2, lon2 = radians(b.lat), radians(b.lon)
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    h = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
-    return 2 * EARTH_RADIUS_M * asin(sqrt(h))
+    """Distance orthodromique entre deux points, en mètres (formule de haversine).
+
+    Ne lève jamais : une base ancienne peut contenir des coordonnées aberrantes
+    (un import antérieur au contrôle des fichiers GPX), et une exception ici
+    surviendrait dans un signal Qt, ce qui emporterait toute l'application au
+    seul affichage de la trace.
+    """
+    try:
+        lat1, lon1 = radians(a.lat), radians(a.lon)
+        lat2, lon2 = radians(b.lat), radians(b.lon)
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        h = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+        # L'arrondi peut faire dépasser 1 sur deux points quasi antipodaux.
+        return 2 * EARTH_RADIUS_M * asin(sqrt(max(0.0, min(1.0, h))))
+    except (ValueError, OverflowError):
+        return 0.0
 
 
 def total_length(points: Sequence[Point]) -> float:

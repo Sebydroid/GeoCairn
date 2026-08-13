@@ -136,6 +136,17 @@ class Database:
                 " ON tracks(IFNULL(folder_id, -1), name)"
             )
 
+            # Une écriture pour de bon, dès l'ouverture. Sur une base déjà en
+            # place, tout ce qui précède se contente de lire : un fichier en
+            # lecture seule (restauré d'une sauvegarde, posé sur un support
+            # protégé) passait alors inaperçu jusqu'à la première trace
+            # enregistrée, où le refus d'écriture emportait l'application.
+            self.conn.execute(
+                "INSERT INTO meta(key, value) VALUES ('derniere_ouverture',"
+                " datetime('now'))"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+            )
+
     def _dedupe_track_names(self) -> int:
         """Renomme les traces homonymes d'un même dossier. Retourne le nombre."""
         doublons = self.conn.execute(

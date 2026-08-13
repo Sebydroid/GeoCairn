@@ -121,12 +121,18 @@ class PointsPanel(QWidget):
 
         self._updating = True
         self.list.clear()
-        for index, point in enumerate(points, start=0):
-            self.list.addItem(
+        # Les lignes sont ajoutées d'un bloc : ajoutées une à une, chacune
+        # relance la mise en page et la barre de défilement de la liste. Sur une
+        # trace de vingt mille points, déplacer un seul repère figeait
+        # l'interface une seconde et demie.
+        self.list.addItems(
+            [
                 f"{index + 1:>4}   {point.lat:.5f} ; {point.lon:.5f}"
                 f"   {format_elevation(point.ele, point.ele_service):>8}"
                 f"   {format_length(distances[index]):>9}"
-            )
+                for index, point in enumerate(points)
+            ]
+        )
         self._updating = False
 
         self.title.setText(titre)

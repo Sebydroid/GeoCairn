@@ -1021,6 +1021,11 @@ class MainWindow(QMainWindow):
                         description=track.description,
                     )
                 )
+                if track.ignores:
+                    problemes.append(
+                        f"{track.name} : {track.ignores} point(s) écarté(s), "
+                        "coordonnées absentes ou aberrantes."
+                    )
 
         if created:
             self.tree_panel.refresh()
@@ -1046,8 +1051,14 @@ class MainWindow(QMainWindow):
         self.map_view.zoom_tracks([track_id])
         return True
 
-    def show_track(self, track_id: int) -> bool:
-        """Ajoute une trace à la carte, sans masquer celles déjà affichées."""
+    def show_track(self, track_id: int, refresh_bulbs: bool = True) -> bool:
+        """Ajoute une trace à la carte, sans masquer celles déjà affichées.
+
+        `refresh_bulbs=False` sert aux traitements par lot : redessiner les
+        ampoules de toute l'arborescence après chaque trace coûte le carré du
+        nombre d'éléments — plusieurs secondes pour « Afficher tout » sur une
+        bibliothèque fournie.
+        """
         track = self.db.get_track(track_id, with_points=True)
         if track is None or not track.points:
             self.status_label.setText("Cette trace ne contient aucun point.")
@@ -1059,7 +1070,8 @@ class MainWindow(QMainWindow):
         self.visible_tracks.add(track_id)
         if not track.visible:
             self.db.set_track_visible(track_id, True)
-        self.tree_panel.refresh_bulbs()
+        if refresh_bulbs:
+            self.tree_panel.refresh_bulbs()
 
         longueur = format_length(total_length(track.points))
         self.status_label.setText(
@@ -1068,12 +1080,14 @@ class MainWindow(QMainWindow):
         )
         return True
 
-    def hide_track(self, track_id: int, remember: bool = True) -> bool:
+    def hide_track(
+        self, track_id: int, remember: bool = True, refresh_bulbs: bool = True
+    ) -> bool:
         """Retire une trace de la carte.
 
         `remember=False` sert à la reprise en édition : la trace disparaît de
         l'affichage simple, mais reste marquée comme affichée pour le prochain
-        lancement.
+        lancement. `refresh_bulbs=False` sert aux traitements par lot.
         """
         if track_id not in self.visible_tracks:
             return False
@@ -1081,7 +1095,8 @@ class MainWindow(QMainWindow):
         self.visible_tracks.discard(track_id)
         if remember:
             self.db.set_track_visible(track_id, False)
-        self.tree_panel.refresh_bulbs()
+        if refresh_bulbs:
+            self.tree_panel.refresh_bulbs()
         return True
 
     def forget_tracks(self, track_ids: list) -> None:
@@ -1138,7 +1153,12 @@ class MainWindow(QMainWindow):
 
     def show_items(self, kind: str, ident: int | None) -> int:
         """Affiche une trace, ou toutes celles d'un dossier."""
-        affichees = [t for t in self.tracks_of(kind, ident) if self.show_track(t)]
+        affichees = [
+            t
+            for t in self.tracks_of(kind, ident)
+            if self.show_track(t, refresh_bulbs=False)
+        ]
+        self.tree_panel.refresh_bulbs()
         if affichees:
             self.status_label.setText(
                 f"{len(self.visible_tracks)} trace(s) affichée(s)."
@@ -1147,7 +1167,12 @@ class MainWindow(QMainWindow):
 
     def hide_items(self, kind: str, ident: int | None) -> int:
         """Masque une trace, ou toutes celles d'un dossier."""
-        masquees = [t for t in self.tracks_of(kind, ident) if self.hide_track(t)]
+        masquees = [
+            t
+            for t in self.tracks_of(kind, ident)
+            if self.hide_track(t, refresh_bulbs=False)
+        ]
+        self.tree_panel.refresh_bulbs()
         if masquees:
             pluriel = "s" if len(masquees) > 1 else ""
             self.status_label.setText(
@@ -1161,8 +1186,8 @@ class MainWindow(QMainWindow):
         cibles = self.tracks_of(kind, ident)
         for track_id in list(self.visible_tracks):
             if track_id not in cibles:
-                self.hide_track(track_id)
-        return self.show_items(kind, ident)
+                self.hide_track(track_id, refresh_bulbs=False)
+        return self.show_items(kind, ident)   # redessine les ampoules à la fin
 
     def zoom_to_items(self, kind: str, ident: int | None) -> bool:
         """Cadre la carte sur une trace ou sur tout un dossier.
@@ -1176,7 +1201,8 @@ class MainWindow(QMainWindow):
             return False
         for track_id in cibles:
             if track_id not in self.visible_tracks:
-                self.show_track(track_id)
+                self.show_track(track_id, refresh_bulbs=False)
+        self.tree_panel.refresh_bulbs()
         self.map_view.zoom_tracks(cibles)
         return True
 
@@ -1259,7 +1285,8 @@ class MainWindow(QMainWindow):
             self._show_draft_on_map(fit=True)
         # Réaffiche ce qui était visible à la fermeture précédente.
         for track_id in self.db.visible_track_ids():
-            self.show_track(track_id)
+            self.show_track(track_id, refresh_bulbs=False)
+        self.tree_panel.refresh_bulbs()
         if self.visible_tracks:
             self.map_view.zoom_tracks(sorted(self.visible_tracks))
             self.status_label.setText(
