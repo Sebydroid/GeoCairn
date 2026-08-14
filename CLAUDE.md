@@ -80,7 +80,7 @@ python main.py
 
 ## Contexte du Projet
 
-Projet : Carto - Logiciel de Gestion de Traces GPX
+Projet : GeoCairn - Logiciel de Gestion de Traces GPX
 Objectif : Application de bureau Windows pour créer et gérer des traces de randonnée
 Architecture : Python + PyQt6 + SQLite + WebEngine (carte interactive)
 

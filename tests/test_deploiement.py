@@ -14,21 +14,21 @@ from pathlib import Path
 
 import pytest
 
-from carto import config
-from carto.database import Database
-from carto.models import Point
+from geocairn import config
+from geocairn.database import Database
+from geocairn.models import Point
 
 
 @pytest.fixture
 def faux_gel(monkeypatch, tmp_path):
     """Simule l'exécution depuis l'exécutable produit par PyInstaller."""
-    installation = tmp_path / "Programmes" / "Carto"
-    ressources = installation / "_internal" / "carto" / "resources"
+    installation = tmp_path / "Programmes" / "GeoCairn"
+    ressources = installation / "_internal" / "geocairn" / "resources"
     ressources.mkdir(parents=True)
     (ressources / "map.html").write_text("<html></html>", encoding="utf-8")
 
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "executable", str(installation / "Carto.exe"))
+    monkeypatch.setattr(sys, "executable", str(installation / "GeoCairn.exe"))
     monkeypatch.setattr(
         sys, "_MEIPASS", str(installation / "_internal"), raising=False
     )
@@ -88,11 +88,11 @@ def test_une_mise_a_jour_ne_touche_pas_aux_traces(tmp_path, monkeypatch):
     On reproduit le geste d'une mise à jour : effacer le dossier d'installation
     et le remplacer par une nouvelle version.
     """
-    installation = tmp_path / "Programmes" / "Carto"
+    installation = tmp_path / "Programmes" / "GeoCairn"
     (installation / "_internal").mkdir(parents=True)
-    (installation / "Carto.exe").write_text("version 1", encoding="utf-8")
+    (installation / "GeoCairn.exe").write_text("version 1", encoding="utf-8")
 
-    donnees = tmp_path / "AppData" / "Local" / "Carto"
+    donnees = tmp_path / "AppData" / "Local" / "GeoCairn"
     monkeypatch.setenv(config.ENV_DATA_DIR, str(donnees))
 
     with Database(config.db_path()) as db:
@@ -108,7 +108,7 @@ def test_une_mise_a_jour_ne_touche_pas_aux_traces(tmp_path, monkeypatch):
     # La mise à jour : l'ancien dossier disparaît, un neuf le remplace.
     shutil.rmtree(installation)
     (installation / "_internal").mkdir(parents=True)
-    (installation / "Carto.exe").write_text("version 2", encoding="utf-8")
+    (installation / "GeoCairn.exe").write_text("version 2", encoding="utf-8")
 
     with Database(config.db_path()) as relue:
         track = relue.get_track(track_id, with_points=True)
@@ -153,20 +153,20 @@ def test_le_repertoire_de_donnees_est_cree_au_besoin(tmp_path, monkeypatch):
 
 
 def test_la_recette_de_construction_existe():
-    spec = Path(config.install_dir()) / "carto.spec"
-    assert spec.is_file(), "carto.spec doit accompagner les sources"
+    spec = Path(config.install_dir()) / "geocairn.spec"
+    assert spec.is_file(), "geocairn.spec doit accompagner les sources"
 
     contenu = spec.read_text(encoding="utf-8")
     # Les ressources doivent être embarquées, sans quoi la carte serait vide.
-    assert "carto/resources" in contenu
+    assert "geocairn/resources" in contenu
     # Les règles d'allègement sont vérifiées par tests/test_livraison.py ;
     # la recette doit s'y référer plutôt que d'en tenir sa propre version.
     assert "from livraison import" in contenu
 
 
 def test_l_autotest_est_disponible():
-    """`Carto.exe --autotest` doit exister pour contrôler une livraison."""
-    from carto import app
+    """`GeoCairn.exe --autotest` doit exister pour contrôler une livraison."""
+    from geocairn import app
 
     assert hasattr(app, "selftest")
     source = Path(app.__file__).read_text(encoding="utf-8")
@@ -175,7 +175,7 @@ def test_l_autotest_est_disponible():
 
 def test_l_autotest_verifie_l_affichage_d_une_trace():
     """Après allègement, il faut s'assurer que la carte dessine encore."""
-    from carto import app
+    from geocairn import app
 
     source = Path(app.__file__).read_text(encoding="utf-8")
     assert "trace affichée sur la carte" in source
@@ -216,14 +216,14 @@ def test_l_installation_se_fait_sans_droits_administrateur():
 
     iss = Path(config.install_dir()) / "installateur.iss"
     if iss.is_file():
-        contenu = iss.read_text(encoding="utf-8")
+        contenu = iss.read_text(encoding="utf-8-sig")
         assert "PrivilegesRequired=lowest" in contenu
         assert "{localappdata}" in contenu
 
 
 def test_l_installeur_ne_supprime_que_le_dossier_du_programme():
     iss = Path(config.install_dir()) / "installateur.iss"
-    contenu = iss.read_text(encoding="utf-8")
+    contenu = iss.read_text(encoding="utf-8-sig")
 
     debut = contenu.index("[UninstallDelete]")
     # Les commentaires — qui rappellent justement la règle — ne sont pas des
@@ -237,5 +237,5 @@ def test_l_installeur_ne_supprime_que_le_dossier_du_programme():
 
     assert "{app}" in section
     # Jamais le dossier des traces.
-    assert "{localappdata}\\Carto" not in section
+    assert "{localappdata}\\GeoCairn" not in section
     assert "{userappdata}" not in section

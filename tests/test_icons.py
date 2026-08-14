@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from carto.app import create_app
-from carto.ui.icons import BULB_OFF, BULB_ON, BULB_PARTIAL, bulb_icon
+from geocairn.app import create_app
+from geocairn.ui.icons import BULB_OFF, BULB_ON, BULB_PARTIAL, bulb_icon
 
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 

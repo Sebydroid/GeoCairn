@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Carto - Carte</title>
+    <title>Géo Cairn — Carte</title>
     <link rel="stylesheet" href="leaflet/leaflet.css" />
     <script src="leaflet/leaflet.js"></script>
     <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
@@ -18,7 +18,7 @@
             color: #333; pointer-events: none;
         }
         /* Flèches de sens de parcours. */
-        .carto-fleche div {
+        .geocairn-fleche div {
             font-size: 15px; line-height: 16px; text-align: center;
             text-shadow: 0 0 2px #ffffff, 0 0 2px #ffffff;
         }
@@ -153,14 +153,14 @@
 
     function addVertex(latlng, index) {
         var marker = L.circleMarker(latlng, vertexStyle(index));
-        marker.cartoIndex = index;
+        marker.geocairnIndex = index;
         draft.markers[index] = marker;
         marker.on("mousedown", function (e) {
             if (!draft.editing) { return; }
             dragged = {
                 marker: marker,
-                index: marker.cartoIndex,
-                start: draft.latlngs[marker.cartoIndex]
+                index: marker.geocairnIndex,
+                start: draft.latlngs[marker.geocairnIndex]
             };
             map.dragging.disable();
             L.DomEvent.stop(e);
@@ -171,7 +171,7 @@
             if (!bridge) { return; }
             var point = e.containerPoint || map.latLngToContainerPoint(e.latlng);
             bridge.js_point_context(
-                marker.cartoIndex, Math.round(point.x), Math.round(point.y)
+                marker.geocairnIndex, Math.round(point.x), Math.round(point.y)
             );
         });
         marker.addTo(draft.vertices);
@@ -284,7 +284,7 @@
 
     function arrowIcon(angle, couleur) {
         return L.divIcon({
-            className: "carto-fleche",
+            className: "geocairn-fleche",
             iconSize: [16, 16],
             iconAnchor: [8, 8],
             html: '<div style="transform: rotate(' + angle + 'deg);'
@@ -332,7 +332,7 @@
     }
 
     // --- API appelée depuis Python -----------------------------------------
-    window.carto = {
+    window.geocairn = {
         setView: function (lat, lon, zoom) {
             map.setView([lat, lon], zoom === undefined ? map.getZoom() : zoom);
         },
@@ -470,7 +470,7 @@
 
         // Repères posés sur une trace consultée, pour une sélection multiple.
         focusPoints: function (coords) {
-            carto.clearFocus();
+            geocairn.clearFocus();
             (coords || []).forEach(function (c) {
                 focusGroup.addLayer(L.circleMarker([c[0], c[1]], {
                     radius: 6, color: "#b8860b", fillColor: "#ffd700",
@@ -486,7 +486,7 @@
         // Repère indépendant du brouillon : sert à désigner un point d'une
         // trace simplement consultée.
         focusPoint: function (lat, lon) {
-            carto.clearFocus();
+            geocairn.clearFocus();
             focusGroup.addLayer(L.circleMarker([lat, lon], {
                 radius: 8, color: "#b8860b", fillColor: "#ffd700",
                 fillOpacity: 1, weight: 3
@@ -508,7 +508,7 @@
 
         // -- traces enregistrees affichees ----------------------------------
         showTrack: function (id, points, color, opacity, fit, name) {
-            carto.hideTrack(id);
+            geocairn.hideTrack(id);
             var latlngs = (points || []).map(function (p) { return [p[0], p[1]]; });
             if (!latlngs.length) { return 0; }
 

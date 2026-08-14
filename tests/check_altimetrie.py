@@ -14,10 +14,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from carto.elevation import ElevationError, fetch_elevations  # noqa: E402
-from carto.geo import format_length, total_length  # noqa: E402
-from carto.gpx import parse_gpx  # noqa: E402
-from carto.models import Point  # noqa: E402
+from geocairn.elevation import ElevationError, fetch_elevations  # noqa: E402
+from geocairn.geo import format_length, total_length  # noqa: E402
+from geocairn.gpx import parse_gpx  # noqa: E402
+from geocairn.models import Point  # noqa: E402
 
 EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
 

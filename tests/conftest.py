@@ -16,8 +16,8 @@ os.environ.setdefault(
     "QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --no-sandbox --disable-dev-shm-usage"
 )
 
-from carto.database import Database  # noqa: E402
-from carto.models import Point  # noqa: E402
+from geocairn.database import Database  # noqa: E402
+from geocairn.models import Point  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -33,13 +33,13 @@ def sans_reseau(monkeypatch):
     def refuser(_url):
         raise OSError("réseau volontairement coupé pendant les tests")
 
-    monkeypatch.setattr("carto.elevation._default_fetch", refuser)
+    monkeypatch.setattr("geocairn.elevation._default_fetch", refuser)
 
 
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     """Base SQLite isolée dans un répertoire temporaire."""
-    monkeypatch.setenv("CARTO_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("GEOCAIRN_DATA_DIR", str(tmp_path / "data"))
     database = Database(tmp_path / "data" / "test.db")
     yield database
     database.close()

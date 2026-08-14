@@ -5,13 +5,26 @@ from __future__ import annotations
 import sqlite3
 import sys
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from . import APP_NAME, APP_VERSION  # noqa: F401  (APP_VERSION sert à l'autotest)
+from . import APP_NAME, APP_SLUG, APP_VERSION  # noqa: F401  (APP_VERSION sert à l'autotest)
 from . import mutex
-from .config import db_path
+from .config import db_path, resource_path
 from .database import Database, FutureSchemaError
 from .ui.main_window import MainWindow
+
+
+def icone() -> QIcon:
+    """Logo du programme, pour la fenêtre et la barre des tâches.
+
+    Le même fichier sert à l'exécutable et aux raccourcis Windows : une seule
+    source, donc aucun risque de voir deux logos différents cohabiter. Une
+    icône absente ne doit pas empêcher le démarrage, d'où l'icône vide en
+    repli.
+    """
+    chemin = resource_path("geocairn.ico")
+    return QIcon(str(chemin)) if chemin.is_file() else QIcon()
 
 
 def create_app(argv: list[str] | None = None) -> QApplication:
@@ -24,11 +37,18 @@ def create_app(argv: list[str] | None = None) -> QApplication:
     if app is None:
         args = list(argv) if argv else list(sys.argv)
         if not args:
-            args = [APP_NAME]
+            args = [APP_SLUG]
         app = QApplication(args)
-    app.setApplicationName(APP_NAME)
+    # Qt bâtit ses propres chemins — le cache du moteur de carte, notamment —
+    # à partir du nom de l'organisation et de celui de l'application. Tous deux
+    # prennent donc l'identifiant technique : sans quoi Chromium écrirait dans
+    # un « ...\GeoCairn\Géo Cairn\cache » accentué. Le nom affiché passe par
+    # setApplicationDisplayName, prévu exactement pour cette distinction.
+    app.setApplicationName(APP_SLUG)
+    app.setApplicationDisplayName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-    app.setOrganizationName(APP_NAME)
+    app.setOrganizationName(APP_SLUG)
+    app.setWindowIcon(icone())
     return app
 
 
@@ -79,7 +99,7 @@ def run(argv: list[str] | None = None) -> int:
 def selftest(argv: list[str] | None = None) -> int:
     """Vérifie que l'application trouve tout ce dont elle a besoin.
 
-    Destiné à la version compilée : lancer `Carto.exe --autotest` contrôle en
+    Destiné à la version compilée : lancer `GeoCairn.exe --autotest` contrôle en
     quelques secondes que les ressources embarquées sont là, que la carte se
     charge et que la base s'ouvre au bon endroit, puis rend un compte rendu et
     un code de sortie. Sans cela, une livraison incomplète ne se découvrirait
@@ -139,7 +159,7 @@ def selftest(argv: list[str] | None = None) -> int:
         QTimer.singleShot(
             300,
             lambda: fenetre.map_view.page().runJavaScript(
-                f"carto.shownCount({trace})",
+                f"geocairn.shownCount({trace})",
                 lambda v: (relever(v), attente.quit()),
             ),
         )
@@ -160,7 +180,7 @@ def selftest(argv: list[str] | None = None) -> int:
 
     fenetre.close()
 
-    print(f"Carto {APP_VERSION} — autotest ({'compilé' if is_frozen() else 'source'})")
+    print(f"{APP_NAME} {APP_VERSION} — autotest ({'compilé' if is_frozen() else 'source'})")
     for libelle, ok, detail in constats:
         print(f"  [{'ok ' if ok else 'ECHEC'}] {libelle}" + (f"  {detail}" if detail else ""))
 

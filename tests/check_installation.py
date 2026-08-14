@@ -22,11 +22,13 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parent.parent
 SCRIPT = RACINE / "outils" / "installer.ps1"
 
+# Les raccourcis portent le nom affiché, accent compris ; le reste — dossiers,
+# exécutable, clé de registre — s'en tient à l'identifiant technique.
 MENU = Path(os.environ.get("APPDATA", "")) / (
-    r"Microsoft\Windows\Start Menu\Programs\Carto.lnk"
+    "Microsoft\\Windows\\Start Menu\\Programs\\Géo Cairn.lnk"
 )
-BUREAU = Path(os.environ.get("USERPROFILE", "")) / "Desktop" / "Carto.lnk"
-CLE = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Carto"
+BUREAU = Path(os.environ.get("USERPROFILE", "")) / "Desktop" / "Géo Cairn.lnk"
+CLE = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GeoCairn"
 
 
 def powershell(*arguments) -> subprocess.CompletedProcess:
@@ -46,12 +48,12 @@ def main() -> int:
     if not SCRIPT.is_file():
         print(f"script d'installation introuvable : {SCRIPT}", flush=True)
         return 1
-    if not (RACINE / "dist" / "Carto" / "Carto.exe").is_file():
+    if not (RACINE / "dist" / "GeoCairn" / "GeoCairn.exe").is_file():
         print("construire d'abord : python build.py", flush=True)
         return 1
 
-    destination = Path(tempfile.mkdtemp(prefix="carto-install-")) / "Carto"
-    donnees = Path(os.environ.get("LOCALAPPDATA", "")) / "Carto"
+    destination = Path(tempfile.mkdtemp(prefix="geocairn-install-")) / "GeoCairn"
+    donnees = Path(os.environ.get("LOCALAPPDATA", "")) / "GeoCairn"
     donnees_avant = donnees.is_dir()
 
     print(f"installation vers : {destination}", flush=True)
@@ -64,9 +66,9 @@ def main() -> int:
         return 1
 
     constats = {
-        "programme installé": (destination / "Carto.exe").is_file(),
+        "programme installé": (destination / "GeoCairn.exe").is_file(),
         "ressources copiées": (
-            destination / "_internal" / "carto" / "resources" / "map.html"
+            destination / "_internal" / "geocairn" / "resources" / "map.html"
         ).is_file(),
         "raccourci menu Démarrer": MENU.is_file(),
         "raccourci Bureau": BUREAU.is_file(),
@@ -88,7 +90,7 @@ def main() -> int:
         "raccourci menu Démarrer retiré": not MENU.is_file(),
         "raccourci Bureau retiré": not BUREAU.is_file(),
         "entrée de désinstallation retirée": not cle_existe(),
-        "programme retiré": not (destination / "Carto.exe").is_file(),
+        "programme retiré": not (destination / "GeoCairn.exe").is_file(),
         "traces de l'utilisateur conservées": donnees.is_dir() or not donnees_avant,
     }
     for libelle, ok in apres.items():

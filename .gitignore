@@ -4,7 +4,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
-# Produits de construction PyInstaller. La recette carto.spec, elle, fait
+# Produits de construction PyInstaller. La recette geocairn.spec, elle, fait
 # partie des sources : c'est elle qui décrit la livraison.
 build/
 build-console/

@@ -1,26 +1,30 @@
-# Installe ou désinstalle Carto pour l'utilisateur courant.
+﻿# Installe ou désinstalle Géo Cairn pour l'utilisateur courant.
 #
 #   powershell -ExecutionPolicy Bypass -File installer.ps1
 #   powershell -ExecutionPolicy Bypass -File installer.ps1 -Desinstaller
 #
 # L'installation se fait dans le profil de l'utilisateur : aucun droit
 # d'administrateur n'est nécessaire. Les traces, elles, vivent dans
-# AppData\Local\Carto et ne sont touchées ni à l'installation ni à la
+# AppData\Local\GeoCairn et ne sont touchées ni à l'installation ni à la
 # désinstallation.
 
 param(
     [switch]$Desinstaller,
-    [string]$Destination = "$env:LOCALAPPDATA\Programs\Carto",
+    [string]$Destination = "$env:LOCALAPPDATA\Programs\GeoCairn",
     [switch]$Silencieux
 )
 
 $ErrorActionPreference = "Stop"
 
-$Nom = "Carto"
-$CleDesinstallation = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Carto"
-$MenuDemarrer = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\$Nom.lnk"
-$Bureau = "$env:USERPROFILE\Desktop\$Nom.lnk"
-$DossierDonnees = "$env:LOCALAPPDATA\Carto"
+# $Nom est l'identifiant technique : nom du processus, de l'exécutable et des
+# dossiers. $Affichage porte l'accent et l'espace, et ne sert qu'aux libellés
+# vus par l'utilisateur — raccourcis et « Applications et fonctionnalités ».
+$Nom = "GeoCairn"
+$Affichage = "Géo Cairn"
+$CleDesinstallation = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GeoCairn"
+$MenuDemarrer = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\$Affichage.lnk"
+$Bureau = "$env:USERPROFILE\Desktop\$Affichage.lnk"
+$DossierDonnees = "$env:LOCALAPPDATA\GeoCairn"
 
 
 function Ecrire($texte) {
@@ -51,16 +55,16 @@ function Installer {
     # $PSScriptRoot et non $MyInvocation : dans une fonction, ce dernier
     # désigne l'appel, pas le fichier.
     $source = $PSScriptRoot
-    if (-not (Test-Path (Join-Path $source "Carto.exe"))) {
+    if (-not (Test-Path (Join-Path $source "GeoCairn.exe"))) {
         # Le script est rangé dans outils/ pendant le développement : le
-        # programme se trouve alors dans dist\Carto.
-        $candidat = Join-Path (Split-Path -Parent $source) "dist\Carto"
-        if (Test-Path (Join-Path $candidat "Carto.exe")) {
+        # programme se trouve alors dans dist\GeoCairn.
+        $candidat = Join-Path (Split-Path -Parent $source) "dist\GeoCairn"
+        if (Test-Path (Join-Path $candidat "GeoCairn.exe")) {
             $source = $candidat
         }
     }
-    if (-not (Test-Path (Join-Path $source "Carto.exe"))) {
-        throw "Carto.exe est introuvable a cote de ce script."
+    if (-not (Test-Path (Join-Path $source "GeoCairn.exe"))) {
+        throw "GeoCairn.exe est introuvable a cote de ce script."
     }
 
     Ecrire "Installation de $Nom"
@@ -82,18 +86,18 @@ function Installer {
         (Join-Path $Destination "Desinstaller.bat"), `
         (Join-Path $Destination "installer.ps1")
 
-    $executable = Join-Path $Destination "Carto.exe"
+    $executable = Join-Path $Destination "GeoCairn.exe"
     Ecrire "  raccourcis..."
     Creer-Raccourci $MenuDemarrer $executable
     Creer-Raccourci $Bureau $executable
 
     $taille = (Get-ChildItem -Recurse $Destination | Measure-Object -Property Length -Sum).Sum / 1024
     New-Item -Path $CleDesinstallation -Force | Out-Null
-    Set-ItemProperty $CleDesinstallation DisplayName $Nom
+    Set-ItemProperty $CleDesinstallation DisplayName $Affichage
     Set-ItemProperty $CleDesinstallation DisplayVersion (
         (Get-Item $executable).VersionInfo.FileVersion
     )
-    Set-ItemProperty $CleDesinstallation Publisher "Carto"
+    Set-ItemProperty $CleDesinstallation Publisher $Affichage
     Set-ItemProperty $CleDesinstallation InstallLocation $Destination
     Set-ItemProperty $CleDesinstallation DisplayIcon $executable
     Set-ItemProperty $CleDesinstallation EstimatedSize ([int]$taille)
@@ -110,14 +114,14 @@ function Installer {
     Ecrire "  vos traces : $DossierDonnees (jamais touchees par une mise a jour)"
 
     if (-not $Silencieux) {
-        $reponse = Read-Host "Lancer Carto maintenant ? (O/n)"
+        $reponse = Read-Host "Lancer $Nom maintenant ? (O/n)"
         if ($reponse -eq "" -or $reponse -match "^[oOyY]") {
             Start-Process $executable
         }
     }
 }
 
-function Desinstaller-Carto {
+function Desinstaller-GeoCairn {
     Verifier-Ferme "la desinstallation"
     Ecrire "Desinstallation de $Nom"
 
@@ -149,4 +153,4 @@ function Desinstaller-Carto {
     }
 }
 
-if ($Desinstaller) { Desinstaller-Carto } else { Installer }
+if ($Desinstaller) { Desinstaller-GeoCairn } else { Installer }

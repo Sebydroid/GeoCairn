@@ -78,8 +78,8 @@ def test_les_ressources_du_moteur_sont_conservees():
         "PyQt6/Qt6/resources/qtwebengine_resources.pak",
         "PyQt6/Qt6/resources/qtwebengine_resources_100p.pak",
         "PyQt6/Qt6/resources/icudtl.dat",
-        "carto/resources/map.html",
-        "carto/resources/leaflet/leaflet.js",
+        "geocairn/resources/map.html",
+        "geocairn/resources/leaflet/leaflet.js",
     ):
         assert ressource_retenue(nom) is True, nom
 
@@ -98,12 +98,12 @@ def test_reconnaissance_des_traductions():
     assert est_traduction(
         "PyQt6\\Qt6\\translations\\qtwebengine_locales\\fr.pak"
     ) is True
-    assert est_traduction("carto/resources/map.html") is False
+    assert est_traduction("geocairn/resources/map.html") is False
 
 
-def test_une_ressource_de_carto_n_est_jamais_prise_pour_une_traduction():
+def test_une_ressource_de_geocairn_n_est_jamais_prise_pour_une_traduction():
     """Le mot « en » dans un nom de fichier ne doit rien déclencher."""
-    assert ressource_retenue("carto/resources/leaflet/images/layers.png") is True
+    assert ressource_retenue("geocairn/resources/leaflet/images/layers.png") is True
 
 
 # ------------------------------------------------ modules et bibliothèques
@@ -153,7 +153,7 @@ def test_les_bibliotheques_etrangeres_sont_reconnues():
 
 def test_les_bibliotheques_du_projet_sont_conservees():
     for source in (
-        r"C:\Claude\Carto\venv\Lib\site-packages\PyQt6\Qt6\bin\Qt6Core.dll",
+        r"C:\Claude\GeoCairn\venv\Lib\site-packages\PyQt6\Qt6\bin\Qt6Core.dll",
         r"C:\Python314\python314.dll",
         r"C:\Python314\DLLs\sqlite3.dll",
     ):
@@ -165,7 +165,7 @@ def test_les_bibliotheques_du_projet_sont_conservees():
 
 def test_la_recette_utilise_ces_regles():
     """La recette ne doit pas redéfinir sa propre version des règles."""
-    spec = Path(__file__).resolve().parent.parent / "carto.spec"
+    spec = Path(__file__).resolve().parent.parent / "geocairn.spec"
     contenu = spec.read_text(encoding="utf-8")
 
     assert "from livraison import" in contenu
@@ -188,7 +188,7 @@ def test_le_controle_repere_les_plaintes_du_programme():
     from build import reperer_plaintes
 
     sortie = (
-        "Carto 1.0.0 — autotest\n"
+        "GeoCairn 1.0.0 — autotest\n"
         "  [ok ] carte chargée\n"
         "but could not find the translation file for the current locale: "
         "en-US.pak\n"

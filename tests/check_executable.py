@@ -1,6 +1,6 @@
 """Vérifie que l'exécutable construit démarre et trouve ses ressources.
 
-    python tests/check_executable.py [chemin/vers/Carto.exe]
+    python tests/check_executable.py [chemin/vers/GeoCairn.exe]
 
 Lance le programme livré dans un répertoire de données isolé, le laisse
 s'installer quelques secondes, puis contrôle qu'il a bien créé sa base et qu'il
@@ -19,10 +19,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from carto.config import DB_FILENAME, ENV_DATA_DIR  # noqa: E402
+from geocairn.config import DB_FILENAME, ENV_DATA_DIR  # noqa: E402
 
 RACINE = Path(__file__).resolve().parent.parent
-DEFAUT = RACINE / "dist" / "Carto" / "Carto.exe"
+DEFAUT = RACINE / "dist" / "GeoCairn" / "GeoCairn.exe"
 ATTENTE_S = 25
 
 
@@ -30,10 +30,10 @@ def main() -> int:
     executable = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAUT
     if not executable.is_file():
         print(f"exécutable absent : {executable}", flush=True)
-        print("construire d'abord : pyinstaller carto.spec --noconfirm", flush=True)
+        print("construire d'abord : pyinstaller geocairn.spec --noconfirm", flush=True)
         return 1
 
-    donnees = Path(tempfile.mkdtemp(prefix="carto-exe-"))
+    donnees = Path(tempfile.mkdtemp(prefix="geocairn-exe-"))
     environnement = dict(os.environ, **{ENV_DATA_DIR: str(donnees)})
 
     print(f"exécutable : {executable}", flush=True)

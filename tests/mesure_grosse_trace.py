@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PyQt6.QtCore import QEventLoop, QTimer  # noqa: E402
 
-from carto.app import create_app  # noqa: E402
-from carto.database import Database  # noqa: E402
-from carto.gpx import parse_gpx  # noqa: E402
-from carto.ui.main_window import MainWindow  # noqa: E402
+from geocairn.app import create_app  # noqa: E402
+from geocairn.database import Database  # noqa: E402
+from geocairn.gpx import parse_gpx  # noqa: E402
+from geocairn.ui.main_window import MainWindow  # noqa: E402
 
 EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
 
@@ -61,8 +61,8 @@ def main() -> int:
             key=lambda f: sum(len(t.points) for t in parse_gpx(f)),
         )
 
-    app = create_app(["carto"])
-    base = Path("mesure-carto.db")
+    app = create_app(["geocairn"])
+    base = Path("mesure-geocairn.db")
     for suffixe in ("", "-wal", "-shm"):
         Path(str(base) + suffixe).unlink(missing_ok=True)
 
@@ -80,14 +80,14 @@ def main() -> int:
 
     debut = time.perf_counter()
     window.resume_track(track_id)
-    attendre(lambda: js(window.map_view, "carto.draftCount()") == len(trace.points))
+    attendre(lambda: js(window.map_view, "geocairn.draftCount()") == len(trace.points))
     print(f"reprise et affichage : {time.perf_counter() - debut:.2f} s", flush=True)
     print(f"poignées dessinées   : "
           f"{js(window.map_view, 'draft.vertices.getLayers().length')}", flush=True)
 
     debut = time.perf_counter()
     window.move_draft_point(10, 49.0, 1.4)
-    attendre(lambda: js(window.map_view, "carto.draftCount()") == len(trace.points))
+    attendre(lambda: js(window.map_view, "geocairn.draftCount()") == len(trace.points))
     print(f"déplacement d'un point : {time.perf_counter() - debut:.2f} s", flush=True)
 
     debut = time.perf_counter()

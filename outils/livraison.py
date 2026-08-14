@@ -1,7 +1,7 @@
 """Règles d'allègement de la livraison Windows.
 
 Ces règles décident de ce que l'exécutable embarque. Elles vivent ici, et non
-dans `carto.spec`, pour être vérifiables par les tests : une erreur de
+dans `geocairn.spec`, pour être vérifiables par les tests : une erreur de
 découpage y avait fait disparaître l'anglais du moteur de carte sans que rien
 ne le signale avant l'exécution.
 """

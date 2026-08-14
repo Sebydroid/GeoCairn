@@ -10,13 +10,14 @@ import pytest
 from PyQt6.QtCore import QEventLoop, QTimer
 from PyQt6.QtWidgets import QApplication, QToolBar
 
-from carto.app import create_app
-from carto.database import Database
-from carto.ui.main_window import MainWindow
-from carto.ui.map_view import LAYER_NAMES, MapView
-from carto.ui.points_panel import PointsPanel
-from carto.ui.profile_panel import ProfilePanel
-from carto.ui.tree_panel import (
+from geocairn import APP_NAME
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.map_view import LAYER_NAMES, MapView
+from geocairn.ui.points_panel import PointsPanel
+from geocairn.ui.profile_panel import ProfilePanel
+from geocairn.ui.tree_panel import (
     COL_NAME,
     KIND_FOLDER,
     KIND_TRACK,
@@ -30,7 +31,7 @@ MAP_LOAD_TIMEOUT_MS = 20000
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -108,7 +109,7 @@ def test_fenetre_principale_quatre_panneaux(qapp, db):
     assert droite.count() == 2
     assert isinstance(droite.widget(0), MapView)
     assert isinstance(droite.widget(1), ProfilePanel)
-    assert "Carto" in window.windowTitle()
+    assert APP_NAME in window.windowTitle()
 
     window.close()
 
@@ -218,17 +219,17 @@ def loaded_map(qapp):
 def test_carte_chargee_et_pont_actif(loaded_map):
     assert loaded_map.is_ready is True
     assert run_js_sync(loaded_map, "typeof L") == "object"
-    assert run_js_sync(loaded_map, "carto.isReady()") is True
+    assert run_js_sync(loaded_map, "geocairn.isReady()") is True
     assert run_js_sync(loaded_map, "bridge !== null") is True
 
 
 def test_couches_javascript_identiques_a_python(loaded_map):
-    assert run_js_sync(loaded_map, "carto.layerNames()") == LAYER_NAMES
+    assert run_js_sync(loaded_map, "geocairn.layerNames()") == LAYER_NAMES
 
 
 def test_le_selecteur_de_couches_reste_sur_la_carte(loaded_map):
     """Le fond de carte se choisit dans le contrôle Leaflet, pas dans la barre."""
-    noms = run_js_sync(loaded_map, "carto.layerNames()")
+    noms = run_js_sync(loaded_map, "geocairn.layerNames()")
 
     assert len(noms) == 5
     assert any("OpenStreetMap" in nom for nom in noms)

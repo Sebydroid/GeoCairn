@@ -7,16 +7,16 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QInputDialog, QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.models import Point
-from carto.ui.main_window import MainWindow
-from carto.ui.profile_panel import (
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.models import Point
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.profile_panel import (
     SOURCE_ELE_FICHIER,
     SOURCE_ELE_SERVICE,
     SOURCE_VITESSE,
 )
-from carto.ui.tree_panel import KIND_FOLDER, KIND_TRACK
+from geocairn.ui.tree_panel import KIND_FOLDER, KIND_TRACK
 from tests.test_ui import run_js_sync, wait_for
 
 QUATRE = [
@@ -29,14 +29,14 @@ QUATRE = [
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
 
 @pytest.fixture(scope="session")
 def window(qapp, tmp_path_factory):
-    database = Database(tmp_path_factory.mktemp("explorateur") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("explorateur") / "geocairn.db")
     win = MainWindow(db=database)
     win.show()
     assert wait_for(lambda: win.map_view.is_ready), "carte non chargée"
@@ -211,7 +211,7 @@ def test_les_traces_supprimees_en_lot_quittent_la_carte(window):
 
     assert window.visible_tracks == set()
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.shownTrackIds()") == [],
+        lambda: run_js_sync(window.map_view, "geocairn.shownTrackIds()") == [],
         timeout_ms=5000,
     )
 
@@ -232,7 +232,7 @@ def test_clic_sur_un_point_en_consultation_centre_la_carte(window):
     assert window.focus_point(2) is True
 
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.hasFocus()") is True,
+        lambda: run_js_sync(window.map_view, "geocairn.hasFocus()") is True,
         timeout_ms=5000,
     )
     centre = run_js_sync(window.map_view, "map.getCenter().lat")
@@ -275,7 +275,7 @@ def test_centrage_en_mode_edition(window):
     assert window.select_point(2) is True
 
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.selectedPoint()") == 2,
+        lambda: run_js_sync(window.map_view, "geocairn.selectedPoint()") == 2,
         timeout_ms=5000,
     )
 
@@ -315,7 +315,7 @@ def test_superposition_altitude_et_vitesse(window):
 def test_les_deux_altitudes_se_superposent(window, monkeypatch):
     track_id = enregistrer(window)
     monkeypatch.setattr(
-        "carto.ui.main_window.fetch_elevations",
+        "geocairn.ui.main_window.fetch_elevations",
         lambda points, on_progress=None: [60.0, 65.0, 70.0, 68.0],
     )
     window.fetch_elevations_for(track_id)

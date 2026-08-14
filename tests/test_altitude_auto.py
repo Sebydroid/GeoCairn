@@ -8,17 +8,17 @@ import urllib.parse
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.models import Point
-from carto.ui.elevation_fetcher import ECHECS_AVANT_VEILLE, ElevationFetcher
-from carto.ui.main_window import MainWindow
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.models import Point
+from geocairn.ui.elevation_fetcher import ECHECS_AVANT_VEILLE, ElevationFetcher
+from geocairn.ui.main_window import MainWindow
 from tests.test_ui import wait_for
 
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -180,7 +180,7 @@ def test_les_requetes_terminees_sont_oubliees(qapp):
 def window(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: None))
-    database = Database(tmp_path / "carto.db")
+    database = Database(tmp_path / "geocairn.db")
     win = MainWindow(db=database)
     yield win
     win.close()
@@ -266,7 +266,7 @@ def test_altitude_ignoree_si_le_point_a_disparu(window):
 
 
 def test_le_profil_se_remplit_avec_l_altitude_recue(window):
-    from carto.ui.profile_panel import SOURCE_ELE_SERVICE
+    from geocairn.ui.profile_panel import SOURCE_ELE_SERVICE
 
     window.elevation_fetcher._fetch = reponse([63.2, 68.0, 74.0])
     window.set_edit_mode(True)

@@ -13,11 +13,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from carto.app import create_app  # noqa: E402
-from carto.elevation import ElevationError, apply_elevations, fetch_elevations  # noqa: E402
-from carto.geo import has_times  # noqa: E402
-from carto.gpx import parse_gpx  # noqa: E402
-from carto.ui.profile_panel import (  # noqa: E402
+from geocairn.app import create_app  # noqa: E402
+from geocairn.elevation import ElevationError, apply_elevations, fetch_elevations  # noqa: E402
+from geocairn.geo import has_times  # noqa: E402
+from geocairn.gpx import parse_gpx  # noqa: E402
+from geocairn.ui.profile_panel import (  # noqa: E402
     SOURCE_ELE_FICHIER,
     SOURCE_ELE_SERVICE,
     SOURCE_VITESSE,
@@ -29,7 +29,7 @@ EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
 
 def main() -> int:
     destination = Path(sys.argv[1] if len(sys.argv) > 1 else "profil.png")
-    app = create_app(["carto"])
+    app = create_app(["geocairn"])
 
     horodatee = None
     for fichier in sorted(EXEMPLES.glob("*.gpx")):

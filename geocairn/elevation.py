@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 from typing import Callable, Sequence
 
-from . import APP_NAME, APP_VERSION
+from . import APP_SLUG, APP_VERSION
 from .models import Point
 
 SERVICE_URL = "https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json"
@@ -41,7 +41,7 @@ class ElevationError(RuntimeError):
 
 def _default_fetch(url: str) -> bytes:
     request = urllib.request.Request(
-        url, headers={"User-Agent": f"{APP_NAME}/{APP_VERSION}"}
+        url, headers={"User-Agent": f"{APP_SLUG}/{APP_VERSION}"}
     )
     with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
         return response.read()

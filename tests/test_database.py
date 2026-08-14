@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from carto.database import (
+from geocairn.database import (
     SCHEMA_VERSION,
     Database,
     DuplicateNameError,
     NotFoundError,
 )
-from carto.models import DEFAULT_TRACK_OPACITY, Point
+from geocairn.models import DEFAULT_TRACK_OPACITY, Point
 
 # --------------------------------------------------------------------- schéma
 

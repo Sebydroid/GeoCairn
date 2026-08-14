@@ -280,7 +280,7 @@ def count_waypoints(path: str | Path) -> int:
     """Nombre de points d'intérêt `<wpt>` du fichier.
 
     Certains fichiers ne contiennent que cela (relevés de points remarquables,
-    sans itinéraire). Carto ne les gère pas encore, mais le savoir permet
+    sans itinéraire). Géo Cairn ne les gère pas encore, mais le savoir permet
     d'expliquer à l'utilisateur pourquoi l'import ne donne rien.
     """
     root = _read_root(Path(path))

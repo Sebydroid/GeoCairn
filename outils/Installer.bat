@@ -1,6 +1,6 @@
 @echo off
-rem Installe Carto pour l'utilisateur courant, sans droits administrateur.
-title Installation de Carto
+rem Installe GeoCairn pour l'utilisateur courant, sans droits administrateur.
+title Installation de GeoCairn
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer.ps1"
 if errorlevel 1 (
     echo.

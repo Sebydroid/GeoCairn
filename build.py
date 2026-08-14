@@ -1,6 +1,6 @@
 """Construit l'exécutable Windows, l'installeur, et contrôle la livraison.
 
-    python build.py                  # version fenêtrée, dans dist/Carto/
+    python build.py                  # version fenêtrée, dans dist/GeoCairn/
     python build.py --console        # variante avec console, pour diagnostiquer
     python build.py --installateur   # + installeur .exe (Inno Setup)
     python build.py --archive        # + archive ZIP prête à distribuer
@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 RACINE = Path(__file__).resolve().parent
-SPEC = RACINE / "carto.spec"
+SPEC = RACINE / "geocairn.spec"
 
 
 def afficher(texte: str) -> None:
@@ -62,7 +62,7 @@ def construire(console: bool) -> Path:
 
     environnement = dict(os.environ, PATH=chemin_assaini())
     if console:
-        environnement["CARTO_CONSOLE"] = "1"
+        environnement["GEOCAIRN_CONSOLE"] = "1"
 
     afficher(f"construction ({'console' if console else 'fenetree'})...")
     debut = time.perf_counter()
@@ -86,7 +86,7 @@ def construire(console: bool) -> Path:
     ecartes = [
         ligne.strip()
         for ligne in resultat.stdout.splitlines()
-        if "[carto.spec]" in ligne
+        if "[geocairn.spec]" in ligne
     ]
     if ecartes:
         afficher(f"  {len(ecartes)} bibliotheque(s) etrangere(s) ecartee(s)")
@@ -96,19 +96,19 @@ def construire(console: bool) -> Path:
             afficher(f"  ... et {len(ecartes) - 5} autres")
 
     afficher(f"terminee en {time.perf_counter() - debut:.0f} s")
-    return sortie / "Carto"
+    return sortie / "GeoCairn"
 
 
 def controler(livraison: Path) -> bool:
     """Lance l'autotest du programme livré, dans des données isolées."""
-    executable = livraison / "Carto.exe"
+    executable = livraison / "GeoCairn.exe"
     if not executable.is_file():
         afficher(f"executable introuvable : {executable}")
         return False
 
     afficher(f"\nlivraison : {livraison}  ({taille_lisible(livraison)})")
     environnement = dict(
-        os.environ, CARTO_DATA_DIR=tempfile.mkdtemp(prefix="carto-controle-")
+        os.environ, GEOCAIRN_DATA_DIR=tempfile.mkdtemp(prefix="geocairn-controle-")
     )
     resultat = subprocess.run(
         [str(executable), "--autotest"],
@@ -155,7 +155,7 @@ def reperer_plaintes(sortie: str) -> list[str]:
 
 def version() -> str:
     """Version déclarée par l'application, sans l'importer."""
-    source = (RACINE / "carto" / "__init__.py").read_text(encoding="utf-8")
+    source = (RACINE / "geocairn" / "__init__.py").read_text(encoding="utf-8")
     for ligne in source.splitlines():
         if ligne.startswith("APP_VERSION"):
             return ligne.split("=", 1)[1].strip().strip('"').strip("'")
@@ -175,7 +175,7 @@ def archiver(livraison: Path) -> Path:
     """Archive ZIP prête à être copiée sur une clé ou envoyée par courriel."""
     sortie = RACINE / "dist-installeur"
     sortie.mkdir(exist_ok=True)
-    base = sortie / f"Carto-{version()}"
+    base = sortie / f"GeoCairn-{version()}"
     afficher("\ncreation de l'archive...")
     chemin = Path(
         shutil.make_archive(str(base), "zip", livraison.parent, livraison.name)
@@ -260,7 +260,7 @@ def construire_installateur(livraison: Path) -> bool:
         afficher(resultat.stderr[-3000:])
         return False
 
-    produit = RACINE / "dist-installeur" / f"Carto-{version()}-installation.exe"
+    produit = RACINE / "dist-installeur" / f"GeoCairn-{version()}-installation.exe"
     if produit.is_file():
         afficher(
             f"installeur : {produit}  "

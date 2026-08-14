@@ -7,12 +7,12 @@ from PyQt6.QtCore import QMimeData, QPointF, Qt
 from PyQt6.QtGui import QDropEvent
 from PyQt6.QtWidgets import QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.geo import elevation_gain, format_speed, speed_stats
-from carto.models import Point
-from carto.ui.main_window import MainWindow
-from carto.ui.tree_panel import KIND_FOLDER, KIND_TRACK
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.geo import elevation_gain, format_speed, speed_stats
+from geocairn.models import Point
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.tree_panel import KIND_FOLDER, KIND_TRACK
 from tests.test_ui import run_js_sync, wait_for
 
 # Un degré de latitude en une heure : environ 111 km/h.
@@ -32,14 +32,14 @@ QUATRE = [
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
 
 @pytest.fixture(scope="session")
 def window(qapp, tmp_path_factory):
-    database = Database(tmp_path_factory.mktemp("liaison") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("liaison") / "geocairn.db")
     win = MainWindow(db=database)
     win.show()
     assert wait_for(lambda: win.map_view.is_ready), "carte non chargée"
@@ -162,7 +162,7 @@ def test_le_resume_utilise_l_altitude_ign_a_defaut(window, monkeypatch):
     dessinee = [Point(48.930, 1.440), Point(48.931, 1.442), Point(48.932, 1.441)]
     track_id = enregistrer(window, "Dessinée", dessinee)
     monkeypatch.setattr(
-        "carto.ui.main_window.fetch_elevations",
+        "geocairn.ui.main_window.fetch_elevations",
         lambda points, on_progress=None: [60.0, 90.0, 70.0],
     )
     window.fetch_elevations_for(track_id)
@@ -223,7 +223,7 @@ def test_le_profil_et_la_liste_suivent_un_clic_sur_le_profil(window):
     assert window.points_panel.selected_indexes() == [3]
     assert window.profile_panel.selected == 3
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.hasFocus()") is True,
+        lambda: run_js_sync(window.map_view, "geocairn.hasFocus()") is True,
         timeout_ms=5000,
     )
 
@@ -239,11 +239,11 @@ def test_selection_hors_bornes_sans_effet(window):
 
 
 def test_l_altitude_ign_peut_etre_decochee(window, monkeypatch):
-    from carto.ui.profile_panel import SOURCE_ELE_FICHIER, SOURCE_ELE_SERVICE
+    from geocairn.ui.profile_panel import SOURCE_ELE_FICHIER, SOURCE_ELE_SERVICE
 
     track_id = enregistrer(window)
     monkeypatch.setattr(
-        "carto.ui.main_window.fetch_elevations",
+        "geocairn.ui.main_window.fetch_elevations",
         lambda points, on_progress=None: [60.0, 65.0, 70.0, 68.0],
     )
     window.fetch_elevations_for(track_id)

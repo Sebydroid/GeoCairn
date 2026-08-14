@@ -6,16 +6,16 @@ import gc
 
 import pytest
 
-from carto.app import create_app
-from carto.database import Database
-from carto.ui.main_window import MainWindow
-from carto.ui.map_view import MapView
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.map_view import MapView
 from tests.test_ui import wait_for
 
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -27,7 +27,7 @@ def test_fermeture_avant_la_fin_du_chargement(qapp, tmp_path):
     fermée entre-temps, le traitement interrogeait une base déjà close ; comme
     l'exception survient dans un slot Qt, PyQt interrompt tout le programme.
     """
-    database = Database(tmp_path / "carto.db")
+    database = Database(tmp_path / "geocairn.db")
     fenetre = MainWindow(db=database)
     fenetre.show()
     fenetre.close()   # avant que la carte n'ait fini de charger
@@ -40,7 +40,7 @@ def test_fermeture_avant_la_fin_du_chargement(qapp, tmp_path):
 
 
 def test_une_carte_survit_a_la_destruction_d_une_fenetre(qapp, tmp_path):
-    database = Database(tmp_path / "carto.db")
+    database = Database(tmp_path / "geocairn.db")
     fenetre = MainWindow(db=database)
     fenetre.show()
     fenetre.close()
@@ -55,9 +55,9 @@ def test_une_carte_survit_a_la_destruction_d_une_fenetre(qapp, tmp_path):
 
 def test_les_traces_visibles_sont_rechargees_apres_fermeture(qapp, tmp_path):
     """La fermeture ne doit pas perdre la liste des traces affichées."""
-    from carto.models import Point
+    from geocairn.models import Point
 
-    chemin = tmp_path / "carto.db"
+    chemin = tmp_path / "geocairn.db"
     database = Database(chemin)
     track_id = database.create_track(
         "Trace", points=[Point(48.9, 1.4), Point(48.91, 1.41)]

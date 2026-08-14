@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import pytest
 
-from carto.app import create_app
-from carto.database import Database
-from carto.ui.main_window import MainWindow
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.ui.main_window import MainWindow
 from tests.test_ui import run_js_sync, wait_for
 
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -25,7 +25,7 @@ def qapp():
 @pytest.fixture(scope="session")
 def window(qapp, tmp_path_factory):
     """Fenêtre complète avec carte réellement chargée (partagée : coûteux)."""
-    database = Database(tmp_path_factory.mktemp("edition") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("edition") / "geocairn.db")
     win = MainWindow(db=database)
     win.show()
     assert wait_for(lambda: win.map_view.is_ready), "carte non chargée"
@@ -48,7 +48,7 @@ def draft_vierge(window):
 
 
 def sync_js_draft_count(window) -> int:
-    return run_js_sync(window.map_view, "carto.draftCount()")
+    return run_js_sync(window.map_view, "geocairn.draftCount()")
 
 
 def fire_map_click(window, lat: float, lon: float) -> None:
@@ -73,7 +73,7 @@ def click_and_wait(window, lat: float, lon: float) -> None:
 
 def test_mode_saisie_desactive_par_defaut(window):
     assert window.edit_mode is False
-    assert run_js_sync(window.map_view, "carto.isEditMode()") is False
+    assert run_js_sync(window.map_view, "geocairn.isEditMode()") is False
 
 
 def test_bouton_creer_une_trace_active_le_mode_saisie(window):
@@ -81,7 +81,7 @@ def test_bouton_creer_une_trace_active_le_mode_saisie(window):
 
     assert window.edit_mode is True
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.isEditMode()") is True,
+        lambda: run_js_sync(window.map_view, "geocairn.isEditMode()") is True,
         timeout_ms=3000,
     )
     assert "cliquez sur la carte" in window.status_label.text().lower()

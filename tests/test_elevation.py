@@ -8,13 +8,13 @@ import urllib.parse
 
 import pytest
 
-from carto.elevation import (
+from geocairn.elevation import (
     BATCH_SIZE,
     ElevationError,
     apply_elevations,
     fetch_elevations,
 )
-from carto.models import Point
+from geocairn.models import Point
 
 TROIS = [Point(48.930, 1.440), Point(48.931, 1.442), Point(48.932, 1.441)]
 

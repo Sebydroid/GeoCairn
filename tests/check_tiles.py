@@ -14,11 +14,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from carto.config import resource_path  # noqa: E402
+from geocairn.config import resource_path  # noqa: E402
 
 #: Tuile de test : vallée de la Seine, zoom 13.
 Z, X, Y = 13, 4143, 2811
-HEADERS = {"User-Agent": "Carto/0.2 (test de tuiles)"}
+HEADERS = {"User-Agent": "GeoCairn/0.2 (test de tuiles)"}
 
 
 def extract_urls() -> dict[str, str]:

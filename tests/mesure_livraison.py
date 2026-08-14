@@ -1,6 +1,6 @@
 """Mesure la taille de la livraison, par poste.
 
-    python tests/mesure_livraison.py [dist/Carto]
+    python tests/mesure_livraison.py [dist/GeoCairn]
 
 Sert à décider ce qu'il est utile d'écarter, et à vérifier l'effet d'un
 allègement.
@@ -20,7 +20,7 @@ def taille(chemins) -> float:
 
 
 def main() -> int:
-    racine = Path(sys.argv[1] if len(sys.argv) > 1 else "dist/Carto").resolve()
+    racine = Path(sys.argv[1] if len(sys.argv) > 1 else "dist/GeoCairn").resolve()
     if not racine.is_dir():
         print(f"livraison introuvable : {racine}", flush=True)
         return 1

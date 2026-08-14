@@ -22,12 +22,12 @@ from pathlib import Path
 
 import pytest
 
-from carto import config, mutex
-from carto.database import Database, FutureSchemaError, SCHEMA_VERSION
-from carto.models import Point
+from geocairn import config, mutex
+from geocairn.database import Database, FutureSchemaError, SCHEMA_VERSION
+from geocairn.models import Point
 
 RACINE = Path(config.install_dir())
-ISS = (RACINE / "installateur.iss").read_text(encoding="utf-8")
+ISS = (RACINE / "installateur.iss").read_text(encoding="utf-8-sig")
 PS1 = (RACINE / "outils" / "installer.ps1").read_text(encoding="utf-8")
 
 
@@ -54,7 +54,7 @@ def test_l_installeur_reconnait_le_programme_ouvert():
     """La marque posée par le programme et celle attendue par l'installeur.
 
     Deux fichiers, une seule chaîne : si l'une dérive, l'installeur croira
-    Carto fermé et écrasera des fichiers verrouillés.
+    GeoCairn fermé et écrasera des fichiers verrouillés.
     """
     assert f"AppMutex={mutex.MUTEX_NAME}" in instructions("Setup")
 
@@ -62,14 +62,14 @@ def test_l_installeur_reconnait_le_programme_ouvert():
 def test_l_installeur_propose_de_fermer_l_application():
     reglages = instructions("Setup")
     assert "CloseApplications=yes" in reglages
-    # La page finale propose déjà de relancer Carto : un redémarrage
+    # La page finale propose déjà de relancer GeoCairn : un redémarrage
     # automatique en ouvrirait un second.
     assert "RestartApplications=no" in reglages
 
 
 def test_le_programme_pose_sa_marque_de_presence():
     """Sans cet appel au démarrage, la directive AppMutex ne sert à rien."""
-    source = (RACINE / "carto" / "app.py").read_text(encoding="utf-8")
+    source = (RACINE / "geocairn" / "app.py").read_text(encoding="utf-8")
     assert "mutex.claim()" in source
 
 
@@ -108,14 +108,14 @@ def test_le_nettoyage_epargne_le_desinstalleur_et_les_traces():
     for ligne in section.splitlines():
         cible = ligne.split("Name:", 1)[1].strip().strip('"')
         assert cible != "{app}"
-        assert "{localappdata}\\Carto" not in cible
+        assert "{localappdata}\\GeoCairn" not in cible
         assert "{userappdata}" not in cible
 
 
 def test_le_dossier_nettoye_est_bien_celui_que_produit_pyinstaller():
     """_internal est le nom donné par PyInstaller 6 ; s'il change, le
     nettoyage viserait le vide sans que rien ne le signale."""
-    livraison = RACINE / "dist" / "Carto"
+    livraison = RACINE / "dist" / "GeoCairn"
     if not livraison.is_dir():
         pytest.skip("aucune livraison construite")
     assert (livraison / "_internal").is_dir()
@@ -148,7 +148,7 @@ def test_le_refus_ne_retient_pas_le_fichier(tmp_path, monkeypatch):
     """Une base refusée doit rester déplaçable, restaurable, sauvegardable.
 
     Sous Windows, un fichier qu'un processus garde ouvert ne peut être ni
-    renommé ni supprimé : l'utilisateur serait coincé jusqu'à fermer Carto.
+    renommé ni supprimé : l'utilisateur serait coincé jusqu'à fermer GeoCairn.
     """
     monkeypatch.setenv(config.ENV_DATA_DIR, str(tmp_path / "donnees"))
     chemin = config.db_path()
@@ -168,7 +168,7 @@ def test_le_refus_ne_retient_pas_le_fichier(tmp_path, monkeypatch):
 
 def test_le_message_explique_quoi_faire():
     """L'utilisateur n'a pas de console : le seul recours est la boîte."""
-    source = (RACINE / "carto" / "app.py").read_text(encoding="utf-8")
+    source = (RACINE / "geocairn" / "app.py").read_text(encoding="utf-8")
     assert "FutureSchemaError" in source
     assert "Réinstallez la dernière version" in source
 

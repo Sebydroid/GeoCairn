@@ -1,6 +1,6 @@
 """Marque de présence du programme, lue par l'installeur Windows.
 
-Une mise à jour remplace les fichiers du dossier d'installation. Si Carto
+Une mise à jour remplace les fichiers du dossier d'installation. Si Géo Cairn
 tourne encore, Windows les retient : l'installation s'arrête à mi-chemin et
 laisse un programme mêlant deux versions — panne difficile à comprendre pour
 l'utilisateur, et impossible à reproduire chez soi. L'installeur interroge donc
@@ -16,7 +16,7 @@ import os
 
 #: Nom du mutex Windows. Sans préfixe « Global\\ » : l'installation se fait dans
 #: le profil de l'utilisateur, la session courante suffit donc.
-MUTEX_NAME = "Carto.Application.Running"
+MUTEX_NAME = "GeoCairn.Application.Running"
 
 #: Conservé pour toute la vie du processus : Windows libère le mutex à la
 #: fermeture du programme, y compris s'il est tué.
@@ -27,7 +27,7 @@ def claim() -> bool:
     """Pose la marque de présence. Vrai si elle est bien en place.
 
     Ne rien poser n'empêche pas le programme de fonctionner : au pire,
-    l'installeur ne saura pas que Carto tourne. L'échec est donc silencieux.
+    l'installeur ne saura pas que Géo Cairn tourne. L'échec est donc silencieux.
     """
     global _handle
     if _handle is not None:

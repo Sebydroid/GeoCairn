@@ -7,16 +7,16 @@ import json
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.models import Point
-from carto.ui.main_window import MainWindow
-from carto.ui.profile_panel import (
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.models import Point
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.profile_panel import (
     SOURCE_ELE_FICHIER,
     SOURCE_ELE_SERVICE,
     SOURCE_VITESSE,
 )
-from carto.ui.tree_panel import KIND_FOLDER, KIND_ROOT, KIND_TRACK
+from geocairn.ui.tree_panel import KIND_FOLDER, KIND_ROOT, KIND_TRACK
 from tests.test_ui import run_js_sync, wait_for
 
 QUATRE = [
@@ -31,14 +31,14 @@ DESSINEE = [Point(48.930, 1.440), Point(48.931, 1.442), Point(48.932, 1.441)]
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
 
 @pytest.fixture(scope="session")
 def window(qapp, tmp_path_factory):
-    database = Database(tmp_path_factory.mktemp("profil") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("profil") / "geocairn.db")
     win = MainWindow(db=database)
     win.show()
     assert wait_for(lambda: win.map_view.is_ready), "carte non chargée"
@@ -171,7 +171,7 @@ def test_le_sens_est_affiche_par_des_fleches(window):
     window.show_track(track_id)
 
     assert wait_for(
-        lambda: run_js_sync(window.map_view, f"carto.arrowCount({track_id})") > 0,
+        lambda: run_js_sync(window.map_view, f"geocairn.arrowCount({track_id})") > 0,
         timeout_ms=5000,
     )
 
@@ -182,11 +182,11 @@ def test_les_fleches_changent_de_sens_avec_la_trace(window):
     track_id = enregistrer(window, points=montante)
     window.show_track(track_id)
     assert wait_for(
-        lambda: run_js_sync(window.map_view, f"carto.arrowCount({track_id})") > 0,
+        lambda: run_js_sync(window.map_view, f"geocairn.arrowCount({track_id})") > 0,
         timeout_ms=5000,
     )
 
-    avant = run_js_sync(window.map_view, f"carto.arrowAngles({track_id})")
+    avant = run_js_sync(window.map_view, f"geocairn.arrowAngles({track_id})")
     assert all(abs(a) < 20 for a in avant), "vers le nord : angle proche de 0°"
 
     window.reverse_track(track_id)
@@ -194,7 +194,7 @@ def test_les_fleches_changent_de_sens_avec_la_trace(window):
     assert wait_for(
         lambda: all(
             abs(abs(a) - 180) < 20
-            for a in run_js_sync(window.map_view, f"carto.arrowAngles({track_id})")
+            for a in run_js_sync(window.map_view, f"geocairn.arrowAngles({track_id})")
         ),
         timeout_ms=5000,
     )
@@ -203,12 +203,12 @@ def test_les_fleches_changent_de_sens_avec_la_trace(window):
 def test_les_fleches_disparaissent_avec_la_trace(window):
     track_id = enregistrer(window)
     window.show_track(track_id)
-    wait_for(lambda: run_js_sync(window.map_view, f"carto.arrowCount({track_id})") > 0)
+    wait_for(lambda: run_js_sync(window.map_view, f"geocairn.arrowCount({track_id})") > 0)
 
     window.hide_track(track_id)
 
     assert wait_for(
-        lambda: run_js_sync(window.map_view, f"carto.arrowCount({track_id})") == 0,
+        lambda: run_js_sync(window.map_view, f"geocairn.arrowCount({track_id})") == 0,
         timeout_ms=5000,
     )
 
@@ -274,7 +274,7 @@ def faux_service(valeurs):
 def test_calcul_de_l_altitude(window, monkeypatch):
     track_id = enregistrer(window, "Dessinée", points=DESSINEE)
     monkeypatch.setattr(
-        "carto.ui.main_window.fetch_elevations",
+        "geocairn.ui.main_window.fetch_elevations",
         lambda points, on_progress=None: [63.2, 68.0, 74.5],
     )
 
@@ -288,7 +288,7 @@ def test_calcul_de_l_altitude(window, monkeypatch):
 def test_l_altitude_calculee_alimente_le_profil(window, monkeypatch):
     track_id = enregistrer(window, "Dessinée", points=DESSINEE)
     monkeypatch.setattr(
-        "carto.ui.main_window.fetch_elevations",
+        "geocairn.ui.main_window.fetch_elevations",
         lambda points, on_progress=None: [63.2, 68.0, 74.5],
     )
     window.tree_panel.select_track(track_id)
@@ -303,7 +303,7 @@ def test_l_altitude_calculee_alimente_le_profil(window, monkeypatch):
 def test_l_altitude_du_fichier_n_est_pas_ecrasee(window, monkeypatch):
     track_id = enregistrer(window)
     monkeypatch.setattr(
-        "carto.ui.main_window.fetch_elevations",
+        "geocairn.ui.main_window.fetch_elevations",
         lambda points, on_progress=None: [10.0, 20.0, 30.0, 40.0],
     )
 
@@ -317,7 +317,7 @@ def test_l_altitude_du_fichier_n_est_pas_ecrasee(window, monkeypatch):
 def test_points_hors_couverture_laisses_vides(window, monkeypatch):
     track_id = enregistrer(window, "Dessinée", points=DESSINEE)
     monkeypatch.setattr(
-        "carto.ui.main_window.fetch_elevations",
+        "geocairn.ui.main_window.fetch_elevations",
         lambda points, on_progress=None: [63.2, None, 74.5],
     )
 
@@ -328,14 +328,14 @@ def test_points_hors_couverture_laisses_vides(window, monkeypatch):
 
 
 def test_service_indisponible_signale(window, monkeypatch):
-    from carto.elevation import ElevationError
+    from geocairn.elevation import ElevationError
 
     track_id = enregistrer(window, "Dessinée", points=DESSINEE)
 
     def echec(points, on_progress=None):
         raise ElevationError("Service altimétrique injoignable")
 
-    monkeypatch.setattr("carto.ui.main_window.fetch_elevations", echec)
+    monkeypatch.setattr("geocairn.ui.main_window.fetch_elevations", echec)
 
     assert window.fetch_elevations_for(track_id) is None
     assert window.db.get_points(track_id)[0].ele_service is None
@@ -345,7 +345,7 @@ def test_l_altitude_calculee_survit_a_la_relecture(window, monkeypatch):
     """L'altitude du service doit être enregistrée, pas seulement affichée."""
     track_id = enregistrer(window, "Dessinée", points=DESSINEE)
     monkeypatch.setattr(
-        "carto.ui.main_window.fetch_elevations",
+        "geocairn.ui.main_window.fetch_elevations",
         lambda points, on_progress=None: [63.2, 68.0, 74.5],
     )
     window.fetch_elevations_for(track_id)

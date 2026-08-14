@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from carto.database import NotFoundError
-from carto.editor import DraftTrack
-from carto.models import Point, Track
+from geocairn.database import NotFoundError
+from geocairn.editor import DraftTrack
+from geocairn.models import Point, Track
 
 
 @pytest.fixture

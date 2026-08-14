@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from carto import config
+from geocairn import APP_SLUG, config
 
 
 def test_data_dir_hors_du_repertoire_du_logiciel(monkeypatch, tmp_path):
@@ -27,15 +27,15 @@ def test_data_dir_utilise_localappdata(monkeypatch, tmp_path):
     monkeypatch.setenv("LOCALAPPDATA", str(local))
 
     if os.name == "nt":
-        assert config.data_dir() == local / "Carto"
+        assert config.data_dir() == local / APP_SLUG
     else:
-        assert config.data_dir().name == "Carto"
+        assert config.data_dir().name == APP_SLUG
 
 
 def test_override_par_variable_denvironnement(monkeypatch, tmp_path):
     monkeypatch.setenv(config.ENV_DATA_DIR, str(tmp_path / "ailleurs"))
     assert config.data_dir() == tmp_path / "ailleurs"
-    assert config.db_path() == tmp_path / "ailleurs" / "carto.db"
+    assert config.db_path() == tmp_path / "ailleurs" / "geocairn.db"
 
 
 def test_ressource_map_html_presente():

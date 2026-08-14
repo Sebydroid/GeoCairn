@@ -2,14 +2,14 @@
 """Recette de construction de l'exécutable Windows.
 
     python build.py            (recommandé : PATH assaini et contrôle)
-    pyinstaller carto.spec --noconfirm
+    pyinstaller geocairn.spec --noconfirm
 
 Le mode « un dossier » est retenu plutôt que le fichier unique : QtWebEngine
 embarque son propre processus de rendu et plusieurs centaines de mégaoctets de
 ressources Chromium, que le mode fichier unique doit extraire dans un dossier
 temporaire à chaque lancement — long au démarrage et source de pannes.
 
-Le dossier produit, dist/Carto/, se remplace tel quel lors d'une mise à jour :
+Le dossier produit, dist/GeoCairn/, se remplace tel quel lors d'une mise à jour :
 aucune donnée utilisateur ne s'y trouve, elles vivent dans AppData.
 
 Les règles d'allègement sont dans outils/livraison.py, pour être vérifiables
@@ -24,13 +24,13 @@ from PyInstaller.utils.hooks import collect_data_files
 sys.path.insert(0, os.path.join(SPECPATH, "outils"))
 from livraison import est_etranger, module_inutile, ressource_retenue  # noqa: E402
 
-# CARTO_CONSOLE=1 produit une variante qui garde une console : indispensable
+# GEOCAIRN_CONSOLE=1 produit une variante qui garde une console : indispensable
 # pour lire une erreur de démarrage, que la version fenêtrée avale.
-CONSOLE = os.environ.get("CARTO_CONSOLE") == "1"
+CONSOLE = os.environ.get("GEOCAIRN_CONSOLE") == "1"
 
 datas = [
     # Carte Leaflet, feuille de style et page : indispensables au démarrage.
-    ("carto/resources", "carto/resources"),
+    ("geocairn/resources", "geocairn/resources"),
 ]
 datas += collect_data_files(
     "PyQt6",
@@ -72,7 +72,7 @@ def _alleger(donnees):
             retenus.append(entree)
         else:
             retire += _poids(entree[1])
-    print(f"[carto.spec] ressources allégées : {retire:.0f} Mo écartés")
+    print(f"[geocairn.spec] ressources allégées : {retire:.0f} Mo écartés")
     return retenus
 
 
@@ -99,11 +99,11 @@ def _ecarter(binaires):
 
     inutiles = len(binaires) - len(retenus) - len(etrangers)
     print(
-        f"[carto.spec] bibliothèques écartées : {len(etrangers)} étrangères, "
+        f"[geocairn.spec] bibliothèques écartées : {len(etrangers)} étrangères, "
         f"{inutiles} modules inutilisés ({gagne:.0f} Mo)"
     )
     for entree in etrangers:
-        print(f"[carto.spec] étranger : {entree[0]}  <-  {entree[1]}")
+        print(f"[geocairn.spec] étranger : {entree[0]}  <-  {entree[1]}")
     return retenus
 
 
@@ -117,7 +117,8 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Carto",
+    name="GeoCairn",
+    icon="geocairn/resources/geocairn.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -137,5 +138,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="Carto",
+    name="GeoCairn",
 )

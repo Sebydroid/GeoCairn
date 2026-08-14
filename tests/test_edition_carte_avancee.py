@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 from PyQt6.QtWidgets import QMenu, QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.models import Point
-from carto.ui.main_window import MainWindow
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.models import Point
+from geocairn.ui.main_window import MainWindow
 from tests.test_ui import run_js_sync, wait_for
 
 QUATRE_POINTS = [
@@ -21,14 +21,14 @@ QUATRE_POINTS = [
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
 
 @pytest.fixture(scope="session")
 def window(qapp, tmp_path_factory):
-    database = Database(tmp_path_factory.mktemp("edition6") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("edition6") / "geocairn.db")
     win = MainWindow(db=database)
     win.show()
     assert wait_for(lambda: win.map_view.is_ready), "carte non chargée"
@@ -61,7 +61,7 @@ def etat_vierge(window, monkeypatch):
 
 
 def js_draft(window) -> int:
-    return run_js_sync(window.map_view, "carto.draftCount()")
+    return run_js_sync(window.map_view, "geocairn.draftCount()")
 
 
 def js_coords(window):
@@ -437,7 +437,7 @@ def test_selection_dans_le_panneau_met_le_point_en_evidence(window):
     window.points_panel.list.setCurrentRow(2)
 
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.selectedPoint()") == 2,
+        lambda: run_js_sync(window.map_view, "geocairn.selectedPoint()") == 2,
         timeout_ms=5000,
     )
 
@@ -669,7 +669,7 @@ def test_la_trace_fusionnee_est_affichee(window):
 
     assert window.visible_tracks == {fusion}
     assert wait_for(
-        lambda: run_js_sync(window.map_view, f"carto.shownCount({fusion})") == 4,
+        lambda: run_js_sync(window.map_view, f"geocairn.shownCount({fusion})") == 4,
         timeout_ms=5000,
     )
 
@@ -711,7 +711,7 @@ def test_duplication_d_une_trace(window):
 
 
 def test_la_copie_est_selectionnee_dans_l_arborescence(window):
-    from carto.ui.tree_panel import KIND_TRACK
+    from geocairn.ui.tree_panel import KIND_TRACK
 
     track_id = trace_enregistree(window, "Rallye")
     window.tree_panel.refresh()

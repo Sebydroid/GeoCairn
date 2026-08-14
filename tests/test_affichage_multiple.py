@@ -6,12 +6,12 @@ import pytest
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QColorDialog, QInputDialog, QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.models import Point
-from carto.ui.icons import BULB_OFF, BULB_ON, BULB_PARTIAL, BULB_WIDTH
-from carto.ui.main_window import MainWindow
-from carto.ui.tree_panel import (
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.models import Point
+from geocairn.ui.icons import BULB_OFF, BULB_ON, BULB_PARTIAL, BULB_WIDTH
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.tree_panel import (
     COL_NAME,
     KIND_FOLDER,
     KIND_ROOT,
@@ -27,14 +27,14 @@ LOIN = [Point(45.8326, 6.8652), Point(45.8400, 6.8700), Point(45.8500, 6.8800)]
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
 
 @pytest.fixture(scope="session")
 def window(qapp, tmp_path_factory):
-    database = Database(tmp_path_factory.mktemp("multi") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("multi") / "geocairn.db")
     win = MainWindow(db=database)
     win.show()
     assert wait_for(lambda: win.map_view.is_ready), "carte non chargée"
@@ -65,7 +65,7 @@ def etat_vierge(window, monkeypatch):
 
 
 def js_shown_ids(window) -> list[int]:
-    return sorted(run_js_sync(window.map_view, "carto.shownTrackIds()") or [])
+    return sorted(run_js_sync(window.map_view, "geocairn.shownTrackIds()") or [])
 
 
 def bulb_state(window, kind, ident) -> str:
@@ -379,7 +379,7 @@ def test_zoom_sur_la_trace(window):
     # cela, le recadrage porterait sur une carte encore vide et la vérification
     # du centre échouerait de façon intermittente.
     assert wait_for(
-        lambda: run_js_sync(window.map_view, f"carto.isTrackShown({loin_id})")
+        lambda: run_js_sync(window.map_view, f"geocairn.isTrackShown({loin_id})")
         is True,
         timeout_ms=10000,
     )
@@ -388,7 +388,7 @@ def test_zoom_sur_la_trace(window):
 
     assert wait_for(lambda: 45.0 < centre() < 46.0, timeout_ms=10000), (
         f"centre resté à {centre()}, taille de carte "
-        f"{run_js_sync(window.map_view, 'carto.mapSize()')}"
+        f"{run_js_sync(window.map_view, 'geocairn.mapSize()')}"
     )
 
 

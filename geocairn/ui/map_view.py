@@ -134,7 +134,7 @@ class MapView(QWebEngineView):
     def _on_ready(self) -> None:
         self.is_ready = True
         # La page a pu se charger avant que la disposition ne soit établie.
-        self.run_js("carto.invalidateSize();")
+        self.run_js("geocairn.invalidateSize();")
         self.map_ready.emit()
 
     def run_js(self, script: str) -> None:
@@ -148,7 +148,7 @@ class MapView(QWebEngineView):
         ne déplace plus rien.
         """
         if self.is_ready:
-            self.run_js("carto.invalidateSize();")
+            self.run_js("geocairn.invalidateSize();")
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -156,61 +156,61 @@ class MapView(QWebEngineView):
 
     def set_view(self, lat: float, lon: float, zoom: int | None = None) -> None:
         zoom_arg = "undefined" if zoom is None else str(int(zoom))
-        self.run_js(f"carto.setView({lat!r}, {lon!r}, {zoom_arg});")
+        self.run_js(f"geocairn.setView({lat!r}, {lon!r}, {zoom_arg});")
 
     def fit_bounds(self, south_west: tuple, north_east: tuple) -> None:
         bounds = json.dumps([list(south_west), list(north_east)])
-        self.run_js(f"carto.fitBounds({bounds});")
+        self.run_js(f"geocairn.fitBounds({bounds});")
 
     def set_base_layer(self, name: str) -> None:
-        self.run_js(f"carto.setBaseLayer({json.dumps(name)});")
+        self.run_js(f"geocairn.setBaseLayer({json.dumps(name)});")
 
     # -------------------------------------------------------------- brouillon
 
     def set_edit_mode(self, enabled: bool) -> None:
         """Active le mode saisie (curseur en croix sur la carte)."""
-        self.run_js(f"carto.setEditMode({str(bool(enabled)).lower()});")
+        self.run_js(f"geocairn.setEditMode({str(bool(enabled)).lower()});")
 
     def append_draft_point(self, lat: float, lon: float) -> None:
         """Ajoute un point à la polyligne du brouillon."""
-        self.run_js(f"carto.appendDraftPoint({lat!r}, {lon!r});")
+        self.run_js(f"geocairn.appendDraftPoint({lat!r}, {lon!r});")
 
     def pop_draft_point(self) -> None:
         """Retire le dernier point de la polyligne du brouillon."""
-        self.run_js("carto.popDraftPoint();")
+        self.run_js("geocairn.popDraftPoint();")
 
     def set_draft(self, points) -> None:
         """Réaffiche entièrement le brouillon à partir d'une liste de points."""
         coords = json.dumps([[p.lat, p.lon] for p in points])
-        self.run_js(f"carto.setDraft({coords});")
+        self.run_js(f"geocairn.setDraft({coords});")
 
     def clear_draft(self) -> None:
-        self.run_js("carto.clearDraft();")
+        self.run_js("geocairn.clearDraft();")
 
     def insert_draft_point(self, index: int, lat: float, lon: float) -> None:
         """Insère un point dans la polyligne du brouillon."""
-        self.run_js(f"carto.insertPoint({int(index)}, {lat!r}, {lon!r});")
+        self.run_js(f"geocairn.insertPoint({int(index)}, {lat!r}, {lon!r});")
 
     def move_draft_point(self, index: int, lat: float, lon: float) -> None:
         """Repositionne un point du brouillon sur la carte."""
-        self.run_js(f"carto.movePoint({int(index)}, {lat!r}, {lon!r});")
+        self.run_js(f"geocairn.movePoint({int(index)}, {lat!r}, {lon!r});")
 
     def focus_point(self, lat: float, lon: float) -> None:
         """Désigne un point d'une trace consultée et centre la carte dessus."""
-        self.run_js(f"carto.focusPoint({lat!r}, {lon!r});")
+        self.run_js(f"geocairn.focusPoint({lat!r}, {lon!r});")
 
     def focus_points(self, coords) -> None:
         """Désigne plusieurs points d'une trace consultée."""
         valeurs = json.dumps([[lat, lon] for lat, lon in coords])
-        self.run_js(f"carto.focusPoints({valeurs});")
+        self.run_js(f"geocairn.focusPoints({valeurs});")
 
     def select_draft_points(self, indexes) -> None:
         """Met plusieurs points du brouillon en évidence."""
         valeurs = json.dumps([int(i) for i in indexes])
-        self.run_js(f"carto.selectPoints({valeurs});")
+        self.run_js(f"geocairn.selectPoints({valeurs});")
 
     def clear_focus(self) -> None:
-        self.run_js("carto.clearFocus();")
+        self.run_js("geocairn.clearFocus();")
 
     def select_draft_point(self, index: int | None, pan: bool = True) -> None:
         """Met un point en évidence (−1 ou None pour n'en sélectionner aucun).
@@ -219,7 +219,7 @@ class MapView(QWebEngineView):
         d'être posé à l'endroit même où l'utilisateur a cliqué.
         """
         self.run_js(
-            f"carto.selectPoint({-1 if index is None else int(index)},"
+            f"geocairn.selectPoint({-1 if index is None else int(index)},"
             f" {str(bool(pan)).lower()});"
         )
 
@@ -237,26 +237,26 @@ class MapView(QWebEngineView):
         """Affiche une trace enregistrée, sans masquer les autres."""
         coords = json.dumps([[p.lat, p.lon] for p in points])
         self.run_js(
-            f"carto.showTrack({int(track_id)}, {coords}, {json.dumps(color)},"
+            f"geocairn.showTrack({int(track_id)}, {coords}, {json.dumps(color)},"
             f" {float(opacity)!r}, {str(bool(fit)).lower()},"
             f" {json.dumps(name)});"
         )
 
     def hide_track(self, track_id: int) -> None:
-        self.run_js(f"carto.hideTrack({int(track_id)});")
+        self.run_js(f"geocairn.hideTrack({int(track_id)});")
 
     def clear_tracks(self) -> None:
-        self.run_js("carto.clearTracks();")
+        self.run_js("geocairn.clearTracks();")
 
     def set_track_style(
         self, track_id: int, color: str, opacity: float
     ) -> None:
         self.run_js(
-            f"carto.setTrackStyle({int(track_id)}, {json.dumps(color)},"
+            f"geocairn.setTrackStyle({int(track_id)}, {json.dumps(color)},"
             f" {float(opacity)!r});"
         )
 
     def zoom_tracks(self, track_ids) -> None:
         """Cadre la carte sur une ou plusieurs traces affichées."""
         ids = json.dumps([int(i) for i in track_ids])
-        self.run_js(f"carto.zoomTracks({ids});")
+        self.run_js(f"geocairn.zoomTracks({ids});")

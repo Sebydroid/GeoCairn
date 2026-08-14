@@ -9,10 +9,10 @@ from PyQt6.QtCore import QMimeData, QPointF, Qt
 from PyQt6.QtGui import QDropEvent
 from PyQt6.QtWidgets import QMessageBox
 
-from carto.app import create_app
-from carto.gpx import GPX_NS
-from carto.ui.main_window import MainWindow
-from carto.ui.tree_panel import (
+from geocairn.app import create_app
+from geocairn.gpx import GPX_NS
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.tree_panel import (
     COL_NAME,
     KIND_FOLDER,
     KIND_TRACK,
@@ -28,7 +28,7 @@ NS = {"gpx": GPX_NS}
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 

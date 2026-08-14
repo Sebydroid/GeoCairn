@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from carto.geo import bounds, distance, format_length, total_length
-from carto.models import Point
+from geocairn.geo import bounds, distance, format_length, total_length
+from geocairn.models import Point
 
 
 def test_distance_nulle():

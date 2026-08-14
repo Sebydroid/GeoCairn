@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PyQt6.QtCore import QEventLoop, QTimer  # noqa: E402
 
-from carto import elevation  # noqa: E402
-from carto.app import create_app  # noqa: E402
-from carto.database import Database  # noqa: E402
-from carto.ui.main_window import MainWindow  # noqa: E402
+from geocairn import elevation  # noqa: E402
+from geocairn.app import create_app  # noqa: E402
+from geocairn.database import Database  # noqa: E402
+from geocairn.ui.main_window import MainWindow  # noqa: E402
 
 #: Adresse réservée à la documentation : aucune machine ne répond.
 INJOIGNABLE = "http://192.0.2.1/altimetrie"
@@ -35,8 +35,8 @@ def main() -> int:
     elevation.SERVICE_URL = INJOIGNABLE
     elevation.TIMEOUT_S = 2
 
-    app = create_app(["carto"])
-    base = Path(tempfile.mkdtemp()) / "carto.db"
+    app = create_app(["geocairn"])
+    base = Path(tempfile.mkdtemp()) / "geocairn.db"
     window = MainWindow(db=Database(base))
     window.show()
     patienter(2000)

@@ -8,17 +8,17 @@ import time
 import pytest
 from PyQt6.QtWidgets import QInputDialog, QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.geo import total_length
-from carto.models import Point
-from carto.simplify import (
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.geo import total_length
+from geocairn.models import Point
+from geocairn.simplify import (
     _distance_au_segment,
     _projeter,
     douglas_peucker,
     simplify_to,
 )
-from carto.ui.main_window import MainWindow
+from geocairn.ui.main_window import MainWindow
 
 
 def ligne_droite(n: int) -> list[Point]:
@@ -45,7 +45,7 @@ def bruitee(n: int) -> list[Point]:
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 

@@ -1,7 +1,36 @@
-# Carto — Gestion de traces GPX
+# Géo Cairn — Gestion de traces GPX
+
+<img src="geocairn/resources/logo.svg" alt="" width="72" align="right">
 
 Application de bureau Windows pour créer, organiser et éditer des traces de
 randonnée (GPX). Voir [PLAN.md](PLAN.md) pour le plan par jalons.
+
+## Nom et identité
+
+Le logiciel s'est d'abord appelé Carto — nom déjà porté par le logiciel qu'il
+remplace (Carto Explorer) et par une plateforme cartographique connue.
+
+Le logo reprend le cairn qui balise les sentiers de montagne : un empilement de
+pierres laissé par ceux qui sont passés avant, surmonté d'un point de position
+qui émet vers les satellites. C'est ce que fait le logiciel — poser des points
+qui marquent un itinéraire.
+
+Deux orthographes cohabitent, et ce n'est pas un oubli :
+
+| Forme | Où | Pourquoi |
+| --- | --- | --- |
+| `Géo Cairn` | titre de fenêtre, menus, installeur, raccourcis, GPX produits | le nom, tel qu'il se lit |
+| `GeoCairn` | exécutable, dossiers, mutex, en-tête réseau, paquet Python | un chemin accentué finit toujours par se faire recoder de travers |
+
+Les deux valeurs vivent dans [geocairn/\_\_init\_\_.py](geocairn/__init__.py)
+(`APP_NAME` et `APP_SLUG`) ; aucun autre fichier ne doit écrire le nom en dur.
+
+Le dessin de référence est [logo.svg](geocairn/resources/logo.svg).
+`python outils/logo.py` en tire `geocairn.ico`, l'icône Windows à sept
+résolutions portée par l'exécutable, les raccourcis et la fenêtre. En dessous de
+32 pixels, un tracé allégé — deux pierres et une seule onde — prend le relais :
+le dessin complet s'y réduirait à une tache. Le fichier `.ico` est versionné,
+Pillow n'est donc nécessaire que pour le refaire.
 
 ## Installation
 
@@ -34,37 +63,40 @@ machine.
 | Chemin | Rôle |
 | --- | --- |
 | `main.py` | Point d'entrée |
-| `carto/config.py` | Emplacement des données utilisateur (AppData) |
-| `carto/database.py` | Base SQLite : dossiers, traces, points |
-| `carto/models.py` | Structures de données (`Folder`, `Track`, `Point`) |
-| `carto/geo.py` | Distances, longueur d'une trace, rectangle englobant |
-| `carto/editor.py` | Trace brouillon maintenue en mémoire pendant la saisie |
-| `carto/gpx.py` | Lecture et écriture du format GPX |
-| `carto/ui/main_window.py` | Fenêtre principale (arborescence + carte) |
-| `carto/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
-| `carto/ui/points_panel.py` | Liste des points de la trace en cours d'édition |
-| `carto/ui/icons.py` | Ampoules d'affichage, dessinées à la volée |
-| `carto/ui/toolbar_icons.py` | Icônes de la barre d'outils, dessinées à la volée |
-| `carto/simplify.py` | Décimation d'une trace (Ramer-Douglas-Peucker) |
-| `carto.spec` | Recette de construction de l'exécutable Windows |
+| `geocairn/config.py` | Emplacement des données utilisateur (AppData) |
+| `geocairn/database.py` | Base SQLite : dossiers, traces, points |
+| `geocairn/models.py` | Structures de données (`Folder`, `Track`, `Point`) |
+| `geocairn/geo.py` | Distances, longueur d'une trace, rectangle englobant |
+| `geocairn/editor.py` | Trace brouillon maintenue en mémoire pendant la saisie |
+| `geocairn/gpx.py` | Lecture et écriture du format GPX |
+| `geocairn/ui/main_window.py` | Fenêtre principale (arborescence + carte) |
+| `geocairn/ui/tree_panel.py` | Panneau de gauche : bibliothèque de traces |
+| `geocairn/ui/points_panel.py` | Liste des points de la trace en cours d'édition |
+| `geocairn/ui/icons.py` | Ampoules d'affichage, dessinées à la volée |
+| `geocairn/ui/toolbar_icons.py` | Icônes de la barre d'outils, dessinées à la volée |
+| `geocairn/simplify.py` | Décimation d'une trace (Ramer-Douglas-Peucker) |
+| `geocairn.spec` | Recette de construction de l'exécutable Windows |
 | `build.py` | Construction, allègement, archive, installeur, contrôle |
 | `installateur.iss` | Recette de l'installeur `.exe` (Inno Setup) |
 | `outils/installer.ps1` | Installation sans outil supplémentaire |
 | `outils/livraison.py` | Règles d'allègement, vérifiées par les tests |
-| `carto/ui/profile_panel.py` | Profil sous la carte : altitude ou vitesse |
-| `carto/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
-| `carto/elevation.py` | Altitude des points par le service IGN |
-| `carto/ui/elevation_fetcher.py` | Altitude en arrière-plan pendant la saisie |
-| `carto/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
-| `carto/resources/map.html` | Carte : couches, évènements, pont JS ↔ Python |
-| `carto/resources/leaflet/` | Leaflet 1.9.4 embarqué (fonctionnement hors ligne) |
+| `geocairn/ui/profile_panel.py` | Profil sous la carte : altitude ou vitesse |
+| `geocairn/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
+| `geocairn/elevation.py` | Altitude des points par le service IGN |
+| `geocairn/ui/elevation_fetcher.py` | Altitude en arrière-plan pendant la saisie |
+| `geocairn/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
+| `geocairn/resources/map.html` | Carte : couches, évènements, pont JS ↔ Python |
+| `geocairn/resources/leaflet/` | Leaflet 1.9.4 embarqué (fonctionnement hors ligne) |
+| `geocairn/resources/logo.svg` | Dessin de référence du logo |
+| `geocairn/resources/geocairn.ico` | Icône Windows, sept résolutions |
+| `outils/logo.py` | Dessin du logo et fabrication du `.ico` |
 
 ## Livraison Windows
 
 ### Construire
 
 ```bash
-python build.py                  # le programme, dans dist/Carto/
+python build.py                  # le programme, dans dist/GeoCairn/
 python build.py --archive        # + archive ZIP prête à distribuer
 python build.py --installateur   # + installeur .exe (voir plus bas)
 python build.py --console        # variante gardant une console, pour diagnostiquer
@@ -78,7 +110,7 @@ détectée à la construction, et non chez l'utilisateur. La même commande sert
 après coup :
 
 ```bash
-Carto.exe --autotest        # contrôler une livraison déjà installée
+GeoCairn.exe --autotest        # contrôler une livraison déjà installée
 ```
 
 Le mode « un dossier » est retenu plutôt que le fichier unique : le moteur de
@@ -91,7 +123,7 @@ même si la commande en vient. Sur une machine où Anaconda est installé, il
 embarquait ainsi ses bibliothèques ICU, que Qt trouvait alors dans le dossier de
 l'application et qui l'empêchaient de démarrer. `build.py` restreint donc le
 `PATH` au système et à l'environnement virtuel du projet, ce qui règle le
-problème à la source ; [carto.spec](carto.spec) garde un filtre en second rideau,
+problème à la source ; [geocairn.spec](geocairn.spec) garde un filtre en second rideau,
 au cas où la construction serait lancée autrement.
 
 ### Taille de la livraison
@@ -115,15 +147,15 @@ pilote graphique correct.
 
 ### Installer
 
-**Sans rien à installer d'autre** : décompresser `Carto-1.0.0.zip`, puis
+**Sans rien à installer d'autre** : décompresser `GeoCairn-1.0.0.zip`, puis
 double-cliquer sur `Installer.bat`. Le programme est copié dans le profil de
-l'utilisateur (`%LOCALAPPDATA%\Programs\Carto`), avec raccourcis au menu
+l'utilisateur (`%LOCALAPPDATA%\Programs\GeoCairn`), avec raccourcis au menu
 Démarrer et sur le Bureau, et une entrée dans « Applications et
 fonctionnalités ». Aucun droit d'administrateur n'est demandé.
 `Desinstaller.bat` fait l'inverse, et **demande** avant de toucher aux traces.
 
 **Installeur `.exe` classique** : `python build.py --installateur` produit
-`dist-installeur\Carto-1.0.0-installation.exe` (92 Mo — mieux compressé que
+`dist-installeur\GeoCairn-1.0.0-installation.exe` (92 Mo — mieux compressé que
 l'archive ZIP). Il faut pour cela Inno Setup, outil gratuit à installer une
 seule fois :
 
@@ -143,18 +175,18 @@ programme installé, désinstallation, puis contrôle que plus rien ne subsiste.
 
 ### Mettre à jour
 
-Il n'y a rien à installer pour utiliser le logiciel : copier le dossier `Carto`
-où l'on veut et lancer `Carto.exe` suffit aussi.
+Il n'y a rien à installer pour utiliser le logiciel : copier le dossier `GeoCairn`
+où l'on veut et lancer `GeoCairn.exe` suffit aussi.
 
 **Mettre à jour, c'est remplacer ce dossier.** Les traces n'y sont pas : elles
 vivent dans `AppData` (voir ci-dessous), que la mise à jour ne touche jamais. La
 marche à suivre :
 
-1. fermer Carto ;
-2. supprimer l'ancien dossier `Carto`, ou le renommer pour pouvoir revenir en
+1. fermer Géo Cairn ;
+2. supprimer l'ancien dossier `GeoCairn`, ou le renommer pour pouvoir revenir en
    arrière ;
 3. y déposer le nouveau ;
-4. relancer `Carto.exe`.
+4. relancer `GeoCairn.exe`.
 
 La base est **mise à niveau automatiquement** si le nouveau logiciel attend un
 format plus récent : colonnes ajoutées, données conservées. L'opération se fait à
@@ -165,18 +197,24 @@ ancienne ouverte par la version du jour.
 ## Sécurité des données
 
 La base SQLite est stockée hors du répertoire d'installation, dans
-`C:\Users\[Nom]\AppData\Local\Carto\carto.db`. Elle est mise à niveau
+`C:\Users\[Nom]\AppData\Local\GeoCairn\geocairn.db`. Elle est mise à niveau
 automatiquement quand le schéma évolue, sans perte de données.
 
 Cela vaut aussi pour la version compilée : l'emplacement est déterminé par le
 compte Windows, jamais par l'endroit d'où le programme s'exécute. Des tests le
 vérifient dans les deux cas, en simulant l'exécutable installé.
 
-**Sauvegarder ses traces**, c'est copier ce seul fichier `carto.db` — ou
+**Sauvegarder ses traces**, c'est copier ce seul fichier `geocairn.db` — ou
 exporter les traces en GPX, format lisible par n'importe quel autre logiciel. Une mise à jour du logiciel
 (remplacement de l'exécutable) ne peut donc pas effacer les traces.
-La variable d'environnement `CARTO_DATA_DIR` permet de surcharger cet
+La variable d'environnement `GEOCAIRN_DATA_DIR` permet de surcharger cet
 emplacement (utilisée par les tests).
+
+**Une installation venant de l'époque « Carto »** retrouve ses traces toute
+seule : au premier lancement, si `...\AppData\Local\GeoCairn\geocairn.db`
+n'existe pas encore et que `...\AppData\Local\Carto\carto.db` est là, la base
+est recopiée sous le nouveau nom. Une copie, et non un déplacement : l'ancien
+dossier reste en place comme filet.
 
 ## Avancement
 
@@ -417,8 +455,8 @@ jamais retirés.
   S'il n'y en a qu'une, il ne demande rien et l'écrit.
 
 **Points d'intérêt non gérés.** Un GPX ne contenant que des `<wpt>` (relevé de
-points remarquables, sans itinéraire) n'a rien à importer : Carto l'explique au
-lieu d'échouer en silence. Le stockage des points d'intérêt n'est pas au plan.
+points remarquables, sans itinéraire) n'a rien à importer : Géo Cairn l'explique
+au lieu d'échouer en silence. Le stockage des points d'intérêt n'est pas au plan.
 
 ## Note technique
 

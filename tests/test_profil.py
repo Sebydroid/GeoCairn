@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from carto.app import create_app
-from carto.geo import cumulative_distances, has_times, speeds
-from carto.models import Point
-from carto.ui.profile_panel import (
+from geocairn.app import create_app
+from geocairn.geo import cumulative_distances, has_times, speeds
+from geocairn.models import Point
+from geocairn.ui.profile_panel import (
     SOURCE_ELE_FICHIER,
     SOURCE_ELE_SERVICE,
     SOURCE_VITESSE,
@@ -19,7 +19,7 @@ from carto.ui.profile_panel import (
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -328,7 +328,7 @@ def test_un_titre_long_n_elargit_pas_les_panneaux(qapp, db):
     Une QLabel ordinaire réclame la largeur de son texte ; le panneau de gauche
     occupait alors la moitié de la fenêtre.
     """
-    from carto.ui.main_window import MainWindow
+    from geocairn.ui.main_window import MainWindow
 
     nom = "OR-7128277--Pacy-sur-Eure:Parcours 20km Samedi Moyens W-E Jeunes"
     track_id = db.create_track(nom, points=AVEC_TOUT)

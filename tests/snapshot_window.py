@@ -16,10 +16,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PyQt6.QtCore import QEventLoop, QTimer  # noqa: E402
 from PyQt6.QtWidgets import QMessageBox  # noqa: E402
 
-from carto.app import create_app  # noqa: E402
-from carto.database import Database  # noqa: E402
-from carto.ui.main_window import MainWindow  # noqa: E402
-from carto.ui.tree_panel import COULEURS, KIND_FOLDER, KIND_TRACK  # noqa: E402
+from geocairn.app import create_app  # noqa: E402
+from geocairn.database import Database  # noqa: E402
+from geocairn.ui.main_window import MainWindow  # noqa: E402
+from geocairn.ui.tree_panel import COULEURS, KIND_FOLDER, KIND_TRACK  # noqa: E402
 
 EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
 
@@ -45,11 +45,11 @@ def attendre(condition, timeout_ms=20000) -> bool:
 
 def main() -> int:
     destination = Path(sys.argv[1] if len(sys.argv) > 1 else "interface.png")
-    base = Path("apercu-carto.db")
+    base = Path("apercu-geocairn.db")
     for suffixe in ("", "-wal", "-shm"):
         Path(str(base) + suffixe).unlink(missing_ok=True)
 
-    app = create_app(["carto"])
+    app = create_app(["geocairn"])
     # Aucune boîte de dialogue ne doit interrompre la capture.
     QMessageBox.warning = staticmethod(lambda *a, **k: None)
     QMessageBox.information = staticmethod(lambda *a, **k: None)

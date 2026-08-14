@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PyQt6.QtCore import QPointF, Qt  # noqa: E402
 from PyQt6.QtGui import QColor, QPainter, QPixmap  # noqa: E402
 
-from carto.app import create_app  # noqa: E402
-from carto.ui.toolbar_icons import TAILLE, toolbar_icon  # noqa: E402
+from geocairn.app import create_app  # noqa: E402
+from geocairn.ui.toolbar_icons import TAILLE, toolbar_icon  # noqa: E402
 
 NOMS = [
     "import", "export", "creer", "modifier",
@@ -26,7 +26,7 @@ FACTEUR = 5
 
 def main() -> int:
     destination = Path(sys.argv[1] if len(sys.argv) > 1 else "icones.png")
-    app = create_app(["carto"])
+    app = create_app(["geocairn"])
 
     cote = TAILLE * FACTEUR
     marge = 14

@@ -17,15 +17,15 @@ from pathlib import Path
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.geo import distance, total_length
-from carto.gpx import ELE_AUTO, coordonnee_valide, parse_gpx, safe_filename
-from carto.models import Point
-from carto.ui.icons import BULB_OFF, BULB_ON, bulb_with
-from carto.ui.main_window import MainWindow
-from carto.ui.toolbar_icons import toolbar_icon
-from carto.ui.tree_panel import KIND_FOLDER
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.geo import distance, total_length
+from geocairn.gpx import ELE_AUTO, coordonnee_valide, parse_gpx, safe_filename
+from geocairn.models import Point
+from geocairn.ui.icons import BULB_OFF, BULB_ON, bulb_with
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.toolbar_icons import toolbar_icon
+from geocairn.ui.tree_panel import KIND_FOLDER
 
 DEUX = [Point(48.930, 1.440), Point(48.931, 1.442)]
 TROIS = DEUX + [Point(48.932, 1.441)]
@@ -34,7 +34,7 @@ QUATRE = TROIS + [Point(48.933, 1.439)]
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -47,7 +47,7 @@ def _fenetre(qapp, tmp_path_factory):
     épuise les ressources de QtWebEngine, et la suite entière finit par mourir
     plusieurs fichiers plus loin, sans le moindre rapport avec le test fautif.
     """
-    database = Database(tmp_path_factory.mktemp("robustesse") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("robustesse") / "geocairn.db")
     win = MainWindow(db=database)
     yield win
     # Fermer pour de bon : une fenêtre laissée vivante retient le moteur web,
@@ -510,7 +510,7 @@ def test_deplacer_une_trace_vers_un_dossier_disparu(window):
     window.db.delete_folder(dossier)
 
     # Le déplacement échoue proprement plutôt que d'interrompre le programme.
-    from carto.database import NotFoundError
+    from geocairn.database import NotFoundError
 
     with pytest.raises(NotFoundError):
         window.tree_panel.move_track(track_id, dossier)
@@ -535,11 +535,11 @@ def test_une_base_en_lecture_seule_est_refusee_des_l_ouverture(tmp_path):
     seule ». Tout se passait bien jusqu'au premier enregistrement, où
     l'exception, levée dans un signal Qt, emportait l'application.
     """
-    chemin = tmp_path / "carto.db"
+    chemin = tmp_path / "geocairn.db"
     Database(chemin).close()
 
     protegees = [
-        p for p in tmp_path.iterdir() if p.name.startswith("carto.db")
+        p for p in tmp_path.iterdir() if p.name.startswith("geocairn.db")
     ]
     for fichier in protegees:
         os.chmod(fichier, stat.S_IREAD)
@@ -553,7 +553,7 @@ def test_une_base_en_lecture_seule_est_refusee_des_l_ouverture(tmp_path):
 
 def test_l_ouverture_laisse_une_trace_datee(tmp_path):
     """L'écriture d'ouverture est ce qui révèle une base non inscriptible."""
-    chemin = tmp_path / "carto.db"
+    chemin = tmp_path / "geocairn.db"
     with Database(chemin) as db:
         ligne = db.conn.execute(
             "SELECT value FROM meta WHERE key = 'derniere_ouverture'"
@@ -564,7 +564,7 @@ def test_l_ouverture_laisse_une_trace_datee(tmp_path):
 
 def test_le_lancement_explique_une_base_inaccessible(qapp, monkeypatch):
     """L'exécutable n'a pas de console : il doit le dire à l'écran."""
-    import carto.app as app_module
+    import geocairn.app as app_module
 
     def base_cassee(*_args, **_kwargs):
         raise sqlite3.DatabaseError("fichier de base illisible")
@@ -576,5 +576,5 @@ def test_le_lancement_explique_une_base_inaccessible(qapp, monkeypatch):
         staticmethod(lambda *args, **kwargs: messages.append(args)),
     )
 
-    assert app_module.run(["carto"]) == 1
+    assert app_module.run(["geocairn"]) == 1
     assert messages, "aucune explication n'a été présentée à l'utilisateur"

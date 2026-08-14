@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
-from carto.app import create_app
-from carto.gpx import write_gpx
-from carto.models import DEFAULT_TRACK_COLOR, Point
-from carto.ui.main_window import MainWindow
-from carto.ui.tree_panel import COL_NAME, KIND_TRACK
+from geocairn.app import create_app
+from geocairn.gpx import write_gpx
+from geocairn.models import DEFAULT_TRACK_COLOR, Point
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.tree_panel import COL_NAME, KIND_TRACK
 from tests.test_ui import run_js_sync, wait_for
 
 EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
@@ -19,7 +19,7 @@ EXEMPLES = Path(__file__).resolve().parent.parent / "GPX exemples"
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -27,9 +27,9 @@ def qapp():
 @pytest.fixture(scope="session")
 def window(qapp, tmp_path_factory):
     """Fenêtre complète avec carte réellement chargée (partagée : coûteux)."""
-    from carto.database import Database
+    from geocairn.database import Database
 
-    database = Database(tmp_path_factory.mktemp("import") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("import") / "geocairn.db")
     win = MainWindow(db=database)
     win.show()
     assert wait_for(lambda: win.map_view.is_ready), "carte non chargée"
@@ -164,7 +164,7 @@ def test_import_des_parcours_reels(window):
 
 
 def js_shown(window, track_id) -> int:
-    return run_js_sync(window.map_view, f"carto.shownCount({track_id})")
+    return run_js_sync(window.map_view, f"geocairn.shownCount({track_id})")
 
 
 def test_double_clic_affiche_la_trace_sur_la_carte(window, tmp_path):
@@ -271,7 +271,7 @@ def test_la_trace_affichee_et_le_brouillon_coexistent(window, tmp_path):
 
     assert len(window.draft) == 2
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.draftCount()") == 2,
+        lambda: run_js_sync(window.map_view, "geocairn.draftCount()") == 2,
         timeout_ms=5000,
     )
     assert js_shown(window, created[0]) == 3

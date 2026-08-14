@@ -34,7 +34,7 @@ def afficher(texte: str) -> None:
 
 def installeur() -> Path | None:
     dossier = RACINE / "dist-installeur"
-    candidats = sorted(dossier.glob("Carto-*-installation.exe"))
+    candidats = sorted(dossier.glob("GeoCairn-*-installation.exe"))
     return candidats[-1] if candidats else None
 
 
@@ -54,7 +54,7 @@ def main() -> int:
                  "python build.py --installateur")
         return 1
 
-    destination = Path(tempfile.mkdtemp(prefix="carto-setup-")) / "Carto"
+    destination = Path(tempfile.mkdtemp(prefix="geocairn-setup-")) / "GeoCairn"
     afficher(f"installeur  : {exe.name}  "
              f"({exe.stat().st_size / 1024 / 1024:.0f} Mo)")
     afficher(f"destination : {destination}")
@@ -67,9 +67,9 @@ def main() -> int:
     afficher(f"installation : code {pose.returncode}")
 
     constats = {
-        "programme installé": (destination / "Carto.exe").is_file(),
+        "programme installé": (destination / "GeoCairn.exe").is_file(),
         "ressources copiées": (
-            destination / "_internal" / "carto" / "resources" / "map.html"
+            destination / "_internal" / "geocairn" / "resources" / "map.html"
         ).is_file(),
         "désinstalleur présent": any(destination.glob("unins*.exe")),
         "entrée de désinstallation": "True" in powershell(f"Test-Path '{CLE}'"),
@@ -78,9 +78,9 @@ def main() -> int:
     # Le programme installé doit être opérationnel, pas seulement présent.
     if constats["programme installé"]:
         controle = subprocess.run(
-            [str(destination / "Carto.exe"), "--autotest"],
+            [str(destination / "GeoCairn.exe"), "--autotest"],
             env=dict(os.environ,
-                     CARTO_DATA_DIR=tempfile.mkdtemp(prefix="carto-donnees-")),
+                     GEOCAIRN_DATA_DIR=tempfile.mkdtemp(prefix="geocairn-donnees-")),
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180,
         )
@@ -101,7 +101,7 @@ def main() -> int:
         time.sleep(8)
 
     apres = {
-        "programme retiré": not (destination / "Carto.exe").is_file(),
+        "programme retiré": not (destination / "GeoCairn.exe").is_file(),
         "entrée de désinstallation retirée":
             "False" in powershell(f"Test-Path '{CLE}'"),
     }

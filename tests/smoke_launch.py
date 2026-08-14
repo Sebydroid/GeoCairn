@@ -15,14 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PyQt6.QtCore import QTimer  # noqa: E402
 
-from carto.app import create_app  # noqa: E402
-from carto.ui.main_window import MainWindow  # noqa: E402
+from geocairn.app import create_app  # noqa: E402
+from geocairn.ui.main_window import MainWindow  # noqa: E402
 
 
 def main() -> int:
     duration_s = float(sys.argv[1]) if len(sys.argv) > 1 else 6.0
 
-    app = create_app(["carto"])
+    app = create_app(["geocairn"])
     window = MainWindow()
     window.show()
 

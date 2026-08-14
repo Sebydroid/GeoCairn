@@ -6,8 +6,9 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from carto.gpx import GPX_NS, build_gpx, safe_filename, write_gpx
-from carto.models import Point
+from geocairn import APP_NAME
+from geocairn.gpx import GPX_NS, build_gpx, safe_filename, write_gpx
+from geocairn.models import Point
 
 NS = {"gpx": GPX_NS}
 
@@ -29,7 +30,7 @@ def test_racine_gpx_conforme(points):
 
     assert root.tag == f"{{{GPX_NS}}}gpx"
     assert root.get("version") == "1.1"
-    assert "Carto" in root.get("creator")
+    assert APP_NAME in root.get("creator")
 
 
 def test_nom_de_la_trace_present_deux_fois(points):

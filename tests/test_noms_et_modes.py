@@ -7,12 +7,12 @@ import sqlite3
 import pytest
 from PyQt6.QtWidgets import QMessageBox
 
-from carto.app import create_app
-from carto.database import Database, DuplicateNameError
-from carto.models import Point
-from carto.ui.main_window import MainWindow
-from carto.ui.toolbar_icons import toolbar_icon
-from carto.ui.tree_panel import COL_NAME, KIND_FOLDER, KIND_TRACK
+from geocairn.app import create_app
+from geocairn.database import Database, DuplicateNameError
+from geocairn.models import Point
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.toolbar_icons import toolbar_icon
+from geocairn.ui.tree_panel import COL_NAME, KIND_FOLDER, KIND_TRACK
 
 DEUX = [Point(48.930, 1.440), Point(48.931, 1.442)]
 TROIS = DEUX + [Point(48.932, 1.441)]
@@ -20,7 +20,7 @@ TROIS = DEUX + [Point(48.932, 1.441)]
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -179,7 +179,7 @@ def test_copier_coller_vers_un_autre_dossier(window):
 
 def test_l_import_departage_les_homonymes(window, tmp_path):
     """Un fichier GPX peut contenir plusieurs traces du même nom."""
-    from carto.gpx import write_gpx
+    from geocairn.gpx import write_gpx
 
     chemin = write_gpx(tmp_path / "double.gpx", "Parcours", DEUX)
     window.import_gpx([str(chemin), str(chemin)])

@@ -12,9 +12,9 @@ import xml.etree.ElementTree as ET
 import pytest
 from PyQt6.QtWidgets import QInputDialog, QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.gpx import (
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.gpx import (
     ELE_AUTO,
     ELE_FICHIER,
     ELE_IGN,
@@ -23,8 +23,8 @@ from carto.gpx import (
     altitudes_disponibles,
     build_gpx,
 )
-from carto.models import Point
-from carto.ui.main_window import MainWindow
+from geocairn.models import Point
+from geocairn.ui.main_window import MainWindow
 
 NS = {"gpx": GPX_NS}
 
@@ -43,7 +43,7 @@ IGN = [70.0, 72.0, 75.0]
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -51,7 +51,7 @@ def qapp():
 @pytest.fixture(scope="module")
 def _fenetre(qapp, tmp_path_factory):
     """Fenêtre partagée : une par test épuiserait le moteur web."""
-    database = Database(tmp_path_factory.mktemp("export") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("export") / "geocairn.db")
     win = MainWindow(db=database)
     yield win
     win.close()

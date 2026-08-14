@@ -1,8 +1,8 @@
-; Recette de l'installeur Windows de Carto (Inno Setup 6).
+﻿; Recette de l'installeur Windows de Géo Cairn (Inno Setup 6).
 ;
 ;   iscc installateur.iss
 ;
-; Produit dist-installeur\Carto-<version>-installation.exe : un installeur
+; Produit dist-installeur\GeoCairn-<version>-installation.exe : un installeur
 ; classique, avec raccourcis, entrée dans « Applications et fonctionnalités »
 ; et désinstallation.
 ;
@@ -10,9 +10,15 @@
 ; d'administrateur n'est demandé, et plusieurs comptes d'un même poste ont
 ; chacun leur installation et leurs traces.
 
-#define MonNom "Carto"
-#define MonEditeur "Carto"
-#define MonExe "Carto.exe"
+; Ce fichier est en UTF-8 avec BOM : sans cette marque, Inno Setup le lit en
+; ANSI et affiche « GÃ©o Cairn » là où il devrait afficher « Géo Cairn ».
+
+; Le nom affiché porte un accent et une espace ; les dossiers, l'exécutable et
+; le fichier produit s'en tiennent à l'identifiant, sans accent ni espace.
+#define MonNom "Géo Cairn"
+#define MonIdentifiant "GeoCairn"
+#define MonEditeur "Géo Cairn"
+#define MonExe "GeoCairn.exe"
 #ifndef MaVersion
   #define MaVersion "1.0.0"
 #endif
@@ -22,15 +28,17 @@ AppId={{8E2C7A34-5F41-4B9E-9C3D-0A6B1D5E7F20}
 AppName={#MonNom}
 AppVersion={#MaVersion}
 AppPublisher={#MonEditeur}
-DefaultDirName={localappdata}\Programs\{#MonNom}
+DefaultDirName={localappdata}\Programs\{#MonIdentifiant}
 DefaultGroupName={#MonNom}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=dist-installeur
-OutputBaseFilename={#MonNom}-{#MaVersion}-installation
+OutputBaseFilename={#MonIdentifiant}-{#MaVersion}-installation
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Icône de l'assistant d'installation et du raccourci de désinstallation.
+SetupIconFile=geocairn\resources\geocairn.ico
 ; Le désinstalleur doit pouvoir retirer proprement le dossier du programme.
 UninstallDisplayIcon={app}\{#MonExe}
 UninstallDisplayName={#MonNom} {#MaVersion}
@@ -38,12 +46,12 @@ UninstallDisplayName={#MonNom} {#MaVersion}
 ; Mise à jour, programme ouvert. Windows retient les fichiers d'une application
 ; qui tourne : sans ces trois directives, la copie échouerait à mi-chemin et
 ; laisserait un mélange de deux versions.
-;   AppMutex          : la marque posée par le programme (voir carto/mutex.py).
+;   AppMutex          : la marque posée par le programme (voir geocairn/mutex.py).
 ;                       Le nom doit rester identique des deux côtés.
 ;   CloseApplications : propose de fermer ce qui retient les fichiers.
-;   RestartApplications=no : la page finale offre déjà de relancer Carto ;
+;   RestartApplications=no : la page finale offre déjà de relancer Géo Cairn ;
 ;                       le redémarrage automatique en ouvrirait un second.
-AppMutex=Carto.Application.Running
+AppMutex=GeoCairn.Application.Running
 CloseApplications=yes
 RestartApplications=no
 
@@ -65,7 +73,7 @@ Type: filesandordirs; Name: "{app}\_internal"
 [Files]
 ; Tout le dossier produit par PyInstaller, sauf les scripts d'installation
 ; sans objet une fois installé.
-Source: "dist\{#MonNom}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; \
+Source: "dist\{#MonIdentifiant}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; \
     Excludes: "Installer.bat,Desinstaller.bat,installer.ps1"
 
 [Icons]
@@ -78,7 +86,7 @@ Filename: "{app}\{#MonExe}"; Description: "Lancer {#MonNom}"; \
 
 [UninstallDelete]
 ; Le dossier du programme uniquement. Les traces vivent dans
-; {localappdata}\Carto et ne doivent jamais être touchées ici.
+; {localappdata}\GeoCairn et ne doivent jamais être touchées ici.
 Type: filesandordirs; Name: "{app}"
 
 [Messages]

@@ -7,12 +7,12 @@ from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QWheelEvent
 from PyQt6.QtWidgets import QMessageBox
 
-from carto.app import create_app
-from carto.database import Database
-from carto.models import Point
-from carto.ui.main_window import MainWindow
-from carto.ui.profile_panel import SOURCE_ELE_FICHIER, ProfilePanel
-from carto.ui.toolbar_icons import toolbar_icon
+from geocairn.app import create_app
+from geocairn.database import Database
+from geocairn.models import Point
+from geocairn.ui.main_window import MainWindow
+from geocairn.ui.profile_panel import SOURCE_ELE_FICHIER, ProfilePanel
+from geocairn.ui.toolbar_icons import toolbar_icon
 from tests.test_ui import run_js_sync, wait_for
 
 DIX = [Point(48.90 + i / 100, 1.44, 100.0 + i * 10) for i in range(10)]
@@ -20,7 +20,7 @@ DIX = [Point(48.90 + i / 100, 1.44, 100.0 + i * 10) for i in range(10)]
 
 @pytest.fixture(scope="session")
 def qapp():
-    app = create_app(["carto-tests"])
+    app = create_app(["geocairn-tests"])
     yield app
     app.processEvents()
 
@@ -253,7 +253,7 @@ def test_les_icones_sont_mises_en_cache(qapp):
 
 @pytest.fixture(scope="session")
 def window(qapp, tmp_path_factory):
-    database = Database(tmp_path_factory.mktemp("zoom") / "carto.db")
+    database = Database(tmp_path_factory.mktemp("zoom") / "geocairn.db")
     win = MainWindow(db=database)
     win.show()
     assert wait_for(lambda: win.map_view.is_ready), "carte non chargée"
@@ -286,7 +286,7 @@ def test_plusieurs_points_selectionnes_dans_les_trois_vues(window):
 
     assert window.profile_panel.selected_indexes == [1, 3, 5]
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.focusCount()") == 3,
+        lambda: run_js_sync(window.map_view, "geocairn.focusCount()") == 3,
         timeout_ms=5000,
     )
 
@@ -310,6 +310,6 @@ def test_selection_multiple_en_edition(window):
     window.select_points([0, 2, 4])
 
     assert wait_for(
-        lambda: run_js_sync(window.map_view, "carto.selectedPoints()") == [0, 2, 4],
+        lambda: run_js_sync(window.map_view, "geocairn.selectedPoints()") == [0, 2, 4],
         timeout_ms=5000,
     )

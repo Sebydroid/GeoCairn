@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from carto.gpx import GpxParseError, count_waypoints, parse_gpx, write_gpx
-from carto.models import Point
+from geocairn.gpx import GpxParseError, count_waypoints, parse_gpx, write_gpx
+from geocairn.models import Point
 
 # Fichier réel produit par PhotoExploreur : il annonce version="1.1" mais
 # déclare l'espace de noms GPX/1/0. La lecture doit rester tolérante.
@@ -169,7 +169,7 @@ def test_fichier_absent(tmp_path):
 
 
 def test_export_puis_import_conserve_la_trace(tmp_path):
-    """Ce que Carto écrit, Carto doit savoir le relire à l'identique."""
+    """Ce que GeoCairn écrit, GeoCairn doit savoir le relire à l'identique."""
     points = [
         Point(48.9300, 1.4400, 70.0),
         Point(48.9310, 1.4420, 72.5),
