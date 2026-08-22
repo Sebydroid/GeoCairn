@@ -174,7 +174,7 @@ pilote graphique correct.
 
 ### Installer
 
-**Sans rien à installer d'autre** : décompresser `GeoCairn-1.0.0.zip`, puis
+**Sans rien à installer d'autre** : décompresser `GeoCairn-<version>.zip`, puis
 double-cliquer sur `Installer.bat`. Le programme est copié dans le profil de
 l'utilisateur (`%LOCALAPPDATA%\Programs\GeoCairn`), avec raccourcis au menu
 Démarrer et sur le Bureau, et une entrée dans « Applications et
@@ -182,7 +182,7 @@ fonctionnalités ». Aucun droit d'administrateur n'est demandé.
 `Desinstaller.bat` fait l'inverse, et **demande** avant de toucher aux traces.
 
 **Installeur `.exe` classique** : `python build.py --installateur` produit
-`dist-installeur\GeoCairn-1.0.0-installation.exe` (92 Mo — mieux compressé que
+`dist-installeur\GeoCairn-<version>-installation.exe` (92 Mo — mieux compressé que
 l'archive ZIP). Il faut pour cela Inno Setup, outil gratuit à installer une
 seule fois :
 

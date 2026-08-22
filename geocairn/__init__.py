@@ -8,6 +8,6 @@ APP_NAME = "Géo Cairn"
 #: un outil qui le recode mal ; le nom affiché ne sert donc jamais de chemin.
 APP_SLUG = "GeoCairn"
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "0.1"
 
 __all__ = ["APP_NAME", "APP_SLUG", "APP_VERSION"]
