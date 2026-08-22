@@ -20,7 +20,7 @@
 #define MonEditeur "Géo Cairn"
 #define MonExe "GeoCairn.exe"
 #ifndef MaVersion
-  #define MaVersion "0.1"
+  #define MaVersion "0.2"
 #endif
 
 [Setup]
