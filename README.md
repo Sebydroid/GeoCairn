@@ -3,7 +3,31 @@
 <img src="geocairn/resources/logo.svg" alt="" width="72" align="right">
 
 Application de bureau Windows pour créer, organiser et éditer des traces de
-randonnée (GPX). Voir [PLAN.md](PLAN.md) pour le plan par jalons.
+randonnée (GPX). Carte interactive, dessin à la souris, altitude IGN, profil
+altimétrique, arborescence de dossiers, import et export GPX. Voir
+[PLAN.md](PLAN.md) pour le plan par jalons.
+
+![licence MIT](https://img.shields.io/badge/licence-MIT-blue)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+![Windows](https://img.shields.io/badge/plateforme-Windows-blue)
+
+## Télécharger
+
+L'installeur Windows est joint à chaque version publiée :
+
+**[→ Dernière version](https://github.com/Sebydroid/GeoCairn/releases/latest)**
+
+Récupérer `GeoCairn-<version>-installation.exe` et le lancer. L'installation se
+fait dans le profil de l'utilisateur : **aucun droit d'administrateur** n'est
+demandé, et chaque compte du poste a ses propres traces.
+
+L'installeur n'est pas signé numériquement — une signature de code coûte
+plusieurs centaines d'euros par an. Windows affiche donc un avertissement
+SmartScreen au premier lancement : *Informations complémentaires* → *Exécuter
+quand même*.
+
+Une fois installé, **le logiciel prévient lui-même quand une nouvelle version
+paraît** (voir [Mise à jour automatique](#mise-à-jour-automatique)).
 
 ## Nom et identité
 
@@ -84,6 +108,9 @@ machine.
 | `geocairn/ui/widgets.py` | Étiquette abrégée, partagée par les panneaux |
 | `geocairn/elevation.py` | Altitude des points par le service IGN |
 | `geocairn/ui/elevation_fetcher.py` | Altitude en arrière-plan pendant la saisie |
+| `geocairn/updates.py` | Recherche d'une nouvelle version sur GitHub |
+| `geocairn/ui/update_checker.py` | La même, en arrière-plan, au démarrage |
+| `geocairn/mutex.py` | Marque de présence lue par l'installeur |
 | `geocairn/ui/map_view.py` | Carte Leaflet dans un `QWebEngineView` |
 | `geocairn/resources/map.html` | Carte : couches, évènements, pont JS ↔ Python |
 | `geocairn/resources/leaflet/` | Leaflet 1.9.4 embarqué (fonctionnement hors ligne) |
@@ -173,7 +200,52 @@ recours.
 bout : installation silencieuse dans un dossier temporaire, autotest du
 programme installé, désinstallation, puis contrôle que plus rien ne subsiste.
 
-### Mettre à jour
+### Mise à jour automatique
+
+**Le logiciel installé va voir tout seul s'il existe une version plus récente.**
+Trois secondes après l'ouverture de la fenêtre, il interroge l'API publique de
+GitHub — sans clé d'accès, et sans rien envoyer de l'utilisateur ni de ses
+traces :
+
+    https://api.github.com/repos/Sebydroid/GeoCairn/releases/latest
+
+S'il y a du neuf, une boîte annonce le numéro de la nouvelle version et ses
+nouveautés, et propose trois choses : **Télécharger**, **Plus tard**, ou
+**Ignorer cette version** — cette dernière ne revient alors plus au lancement
+suivant. *Aide → Rechercher les mises à jour…* force une recherche à tout moment.
+
+La discrétion est la règle :
+
+- **une fois par jour au plus** ; la date est notée dans la bibliothèque de
+  l'utilisateur ;
+- **rien ne s'affiche** s'il n'y a pas de nouveauté, ou si GitHub ne répond
+  pas : un lancement hors connexion se passe exactement comme les autres ;
+- l'appel part **dans un fil séparé**, avec un délai maximal de dix secondes :
+  un service lent ne retarde jamais l'affichage de la fenêtre ;
+- **depuis les sources, la recherche automatique ne part pas** — il n'y aurait
+  pas d'installeur à proposer, on met à jour avec `git pull`. Le menu, lui,
+  fonctionne partout.
+- `GEOCAIRN_SANS_MAJ=1` débranche la recherche automatique.
+
+Le téléchargement est confié au **navigateur** : il sait reprendre une coupure,
+et l'utilisateur voit ce qu'il récupère. Le logiciel ne se remplace jamais
+lui-même pendant qu'il tourne — un programme qui fait cela est une source
+d'ennuis sans commune mesure avec le gain.
+
+**Le programme ouvert au moment d'installer** est le piège classique : Windows
+retient les fichiers d'un programme qui tourne, et l'installation s'arrêterait à
+mi-chemin en laissant un mélange de deux versions. Trois gardes-fous se
+complètent : la boîte qui suit le téléchargement le rappelle et propose de
+fermer Géo Cairn tout de suite ; l'installeur s'en aperçoit tout seul grâce à la
+marque de présence posée par le programme (`AppMutex`, voir
+[geocairn/mutex.py](geocairn/mutex.py)) et propose de le fermer ; et le script
+`installer.ps1` de la voie ZIP refuse d'installer par-dessus un programme
+ouvert, avant toute suppression.
+
+La procédure de publication d'une version est dans
+[PUBLICATION.md](PUBLICATION.md).
+
+### Mettre à jour à la main
 
 Il n'y a rien à installer pour utiliser le logiciel : copier le dossier `GeoCairn`
 où l'on veut et lancer `GeoCairn.exe` suffit aussi.
@@ -463,3 +535,23 @@ au lieu d'échouer en silence. Le stockage des points d'intérêt n'est pas au p
 `QApplication` doit toujours recevoir un `argv[0]` non vide : QtWebEngine
 (Chromium) interrompt brutalement le processus dans le cas contraire. Un test de
 régression couvre ce point (`tests/test_ui.py`).
+
+## Contribuer
+
+Les remarques et les rapports de panne sont bienvenus dans les
+[issues](https://github.com/Sebydroid/GeoCairn/issues). Pour une proposition de
+code : `pytest tests/` doit passer, les messages de commit sont en français et
+commencent par un verbe d'action, et le code suit les conventions des fichiers
+voisins — noms français, commentaires qui expliquent *pourquoi* plutôt que
+*quoi*.
+
+## Licence
+
+[MIT](LICENSE) — libre de réutilisation, y compris commerciale, en gardant la
+mention de copyright.
+
+Le logiciel embarque **Leaflet** (BSD 2 clauses) et s'appuie sur **PyQt6**,
+diffusé sous GPL v3 : une redistribution du programme *compilé* emporte donc
+les obligations de la GPL v3 pour cette part. Les fonds de carte viennent
+d'OpenStreetMap (ODbL) et de la Géoplateforme de l'IGN ; ils ne sont pas
+redistribués avec le logiciel. Le détail est en fin de [LICENSE](LICENSE).

@@ -2,7 +2,7 @@
 
 ## 1. Contexte et Objectifs
 
-Le projet consiste à développer un logiciel de bureau pour Windows dédié à la création, la gestion et l'édition de traces de randonnée (fichiers GPX). L'objectif est de proposer une alternative moderne et maintenable à d'anciens logiciels comme GeoCairn Explorer, avec un outil facile à utiliser, destiné à un usage personnel et familial.
+Le projet consiste à développer un logiciel de bureau pour Windows dédié à la création, la gestion et l'édition de traces de randonnée (fichiers GPX). L'objectif est de proposer une alternative moderne et maintenable à d'anciens logiciels comme Carto Explorer, avec un outil facile à utiliser, destiné à un usage personnel et familial.
 
 ## 2. Contraintes Techniques et Choix d'Architecture
 

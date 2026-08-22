@@ -1,8 +1,14 @@
 GPX exemples/
 venv/
+.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Réglages d'éditeur et d'outils, propres au poste.
+.idea/
+.vscode/
+.claude/
 
 # Produits de construction PyInstaller. La recette geocairn.spec, elle, fait
 # partie des sources : c'est elle qui décrit la livraison.

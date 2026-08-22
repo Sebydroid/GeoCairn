@@ -254,6 +254,29 @@ class Database:
         ).fetchone()
         return int(row["value"]) if row else 0
 
+    # ------------------------------------------------------------- réglages
+
+    def get_meta(self, cle: str, defaut: str = "") -> str:
+        """Valeur d'un réglage rangé dans la table `meta`.
+
+        La table existe depuis l'origine pour la version du schéma ; elle sert
+        aussi aux quelques réglages qui suivent la bibliothèque de l'utilisateur
+        plutôt que la machine — la version de mise à jour écartée, par exemple.
+        """
+        ligne = self.conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (cle,)
+        ).fetchone()
+        return ligne["value"] if ligne else defaut
+
+    def set_meta(self, cle: str, valeur: str) -> None:
+        """Écrit un réglage dans la table `meta`."""
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO meta(key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (cle, str(valeur)),
+            )
+
     def close(self) -> None:
         self._closed = True
         self.conn.close()

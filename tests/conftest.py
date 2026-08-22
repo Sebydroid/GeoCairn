@@ -12,6 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Les tests d'interface tournent sans écran ni GPU.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Aucun test ne doit aller interroger GitHub. La recherche automatique ne part
+# déjà pas depuis les sources ; ce garde-fou couvre aussi les tests qui font
+# croire à l'application qu'elle est compilée.
+os.environ.setdefault("GEOCAIRN_SANS_MAJ", "1")
 os.environ.setdefault(
     "QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu --no-sandbox --disable-dev-shm-usage"
 )

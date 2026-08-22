@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import datetime
+import os
+import sqlite3
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtCore import QPoint, Qt, QTimer, QUrl
+from PyQt6.QtGui import QAction, QDesktopServices, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -21,7 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .. import APP_NAME, APP_VERSION
-from ..config import db_path
+from ..config import db_path, is_frozen
 from ..database import Database
 from ..editor import DraftTrack
 from ..elevation import ElevationError, fetch_elevations
@@ -42,6 +45,34 @@ from .points_panel import PointsPanel
 from .profile_panel import SOURCE_ELE_SERVICE, ProfilePanel
 from .toolbar_icons import toolbar_icon
 from .tree_panel import KIND_ROOT, KIND_TRACK, TreePanel, track_ids_under
+from .update_checker import UpdateChecker
+
+#: Réglages de la recherche de mise à jour, rangés dans la table `meta`.
+CLE_MAJ_IGNOREE = "maj_version_ignoree"
+CLE_MAJ_DERNIERE = "maj_derniere_recherche"
+
+#: Variable d'environnement qui coupe la recherche automatique. Posée par les
+#: tests, et de quoi débrancher la chose sur un poste sans accès à Internet.
+ENV_SANS_MAJ = "GEOCAIRN_SANS_MAJ"
+
+#: Délai avant la recherche du démarrage : la fenêtre s'affiche d'abord, la
+#: carte se charge, et la boîte n'arrive pas sur un écran encore vide.
+DELAI_RECHERCHE_MS = 3000
+
+#: Au-delà, les nouveautés sont tronquées : la boîte doit rester lisible.
+LIGNES_DE_NOTES = 12
+
+
+def abreger(notes: str, lignes: int = LIGNES_DE_NOTES) -> str:
+    """Les premières lignes du texte d'une publication GitHub.
+
+    Le texte est écrit librement par l'auteur de la publication : rien ne
+    garantit qu'il tienne dans une boîte de dialogue.
+    """
+    decoupe = notes.strip().splitlines()
+    if len(decoupe) <= lignes:
+        return "\n".join(decoupe)
+    return "\n".join(decoupe[:lignes] + ["…"])
 
 
 class MainWindow(QMainWindow):
@@ -65,6 +96,12 @@ class MainWindow(QMainWindow):
         self.elevation_fetcher = ElevationFetcher(self)
         #: Mode saisie : porté par la fenêtre, reflété par les deux boutons.
         self._edit_mode = False
+        #: Recherche d'une version plus récente sur GitHub.
+        self.update_checker = UpdateChecker(APP_VERSION, self)
+        #: Vrai pour la recherche du démarrage : elle ne dit rien quand il n'y
+        #: a rien à dire. Une recherche demandée par le menu, elle, répond
+        #: toujours — sans quoi l'utilisateur croirait le menu sans effet.
+        self._maj_silencieuse = True
 
         self.tree_panel = TreePanel(self.db, self.visible_tracks, self)
         self.points_panel = PointsPanel(self)
@@ -133,6 +170,9 @@ class MainWindow(QMainWindow):
         self.points_panel.delete_requested.connect(self.remove_draft_points)
         self.points_panel.split_requested.connect(self.split_draft)
 
+        self.update_checker.terminee.connect(self._on_update_result)
+        self.update_checker.echouee.connect(self._on_update_failed)
+
         self.tree_panel.selection_changed.connect(self._on_tree_selection)
         self.tree_panel.reverse_requested.connect(self.reverse_track)
         self.tree_panel.elevation_requested.connect(self.fetch_elevations_for)
@@ -140,6 +180,14 @@ class MainWindow(QMainWindow):
         self.profile_panel.point_clicked.connect(self.select_point)
 
         self._update_draft_actions()
+        # Un minuteur rattaché à la fenêtre, et non `QTimer.singleShot` : la
+        # fenêtre peut être détruite avant l'échéance — c'est le cas de bien
+        # des tests —, et le minuteur disparaît alors avec elle plutôt que
+        # d'appeler une méthode dont l'objet n'existe plus.
+        self._minuteur_maj = QTimer(self)
+        self._minuteur_maj.setSingleShot(True)
+        self._minuteur_maj.timeout.connect(self.rechercher_mise_a_jour_au_demarrage)
+        self._minuteur_maj.start(DELAI_RECHERCHE_MS)
 
     # ------------------------------------------------------------ interface
 
@@ -274,6 +322,13 @@ class MainWindow(QMainWindow):
         view_menu.addAction(refresh_action)
 
         help_menu = menu.addMenu("&Aide")
+        self.action_check_updates = QAction("Rechercher les &mises à jour…", self)
+        self.action_check_updates.setToolTip(
+            "Va voir sur GitHub s'il existe une version plus récente"
+        )
+        self.action_check_updates.triggered.connect(self.rechercher_mise_a_jour)
+        help_menu.addAction(self.action_check_updates)
+        help_menu.addSeparator()
         about_action = QAction("À &propos", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
@@ -1353,6 +1408,177 @@ class MainWindow(QMainWindow):
         """Le fond de carte se choisit dans le sélecteur de la carte."""
         self.status_label.setText(f"Fond de carte : {name}")
 
+    # -------------------------------------------------- mise à jour (GitHub)
+
+    def rechercher_mise_a_jour_au_demarrage(self) -> bool:
+        """Recherche discrète au lancement. Faux si elle n'a pas lieu.
+
+        Trois raisons de s'abstenir : la fenêtre se referme déjà, le poste a
+        débranché la chose (`GEOCAIRN_SANS_MAJ`), ou GitHub a déjà été
+        interrogé aujourd'hui. Une quatrième vaut d'être expliquée : depuis les
+        sources, il n'y a pas d'installeur à proposer — on met à jour avec
+        `git pull`. Le menu *Aide* reste disponible pour aller voir malgré tout.
+        """
+        if self._closing or os.environ.get(ENV_SANS_MAJ):
+            return False
+        if not is_frozen():
+            return False
+        if self._lire_reglage(CLE_MAJ_DERNIERE) == self._aujourd_hui():
+            return False
+
+        self._maj_silencieuse = True
+        return self.update_checker.check()
+
+    def rechercher_mise_a_jour(self) -> bool:
+        """Recherche demandée par le menu : la réponse est toujours montrée."""
+        if self._closing:
+            return False
+        self._maj_silencieuse = False
+        self.status_label.setText("Recherche d'une nouvelle version…")
+        return self.update_checker.check()
+
+    def _on_update_result(self, version) -> None:
+        """Issue de la recherche ; `version` vaut None si rien de plus récent."""
+        if self._closing:
+            return
+        silencieuse = self._maj_silencieuse
+        self._maj_silencieuse = True
+        self._ecrire_reglage(CLE_MAJ_DERNIERE, self._aujourd_hui())
+
+        if version is None:
+            message = f"{APP_NAME} {APP_VERSION} est à jour."
+            self.status_label.setText(message)
+            if not silencieuse:
+                QMessageBox.information(self, f"{APP_NAME} — mise à jour", message)
+            return
+
+        # Une version écartée par l'utilisateur ne revient pas le harceler à
+        # chaque lancement ; une recherche qu'il demande lui-même, si.
+        if silencieuse and version.numero == self._lire_reglage(CLE_MAJ_IGNOREE):
+            return
+
+        self._proposer_la_mise_a_jour(version)
+
+    def _on_update_failed(self, message: str) -> None:
+        """GitHub n'a pas répondu.
+
+        Une recherche du démarrage qui échoue ne doit pas se remarquer : rien
+        n'est affiché, et la date n'est pas notée pour que le prochain
+        lancement retente.
+        """
+        silencieuse = self._maj_silencieuse
+        self._maj_silencieuse = True
+        if self._closing or silencieuse:
+            return
+        self.status_label.setText(f"Mise à jour : {message}")
+        QMessageBox.warning(self, f"{APP_NAME} — mise à jour", message)
+
+    def _proposer_la_mise_a_jour(self, version) -> None:
+        """Annonce la nouvelle version et laisse le choix à l'utilisateur."""
+        boite = QMessageBox(self)
+        boite.setIcon(QMessageBox.Icon.Information)
+        boite.setWindowTitle(f"{APP_NAME} — mise à jour disponible")
+        # Le texte de la publication est écrit librement sur GitHub : le
+        # prendre pour du HTML lui ferait avaler ce qui ressemble à une balise.
+        boite.setTextFormat(Qt.TextFormat.PlainText)
+        boite.setText(
+            f"{APP_NAME} {version.numero} est disponible.\n"
+            f"Vous utilisez la version {APP_VERSION}."
+        )
+        if version.notes:
+            boite.setInformativeText("Nouveautés :\n" + abreger(version.notes))
+
+        telecharger = boite.addButton(
+            "Télécharger", QMessageBox.ButtonRole.AcceptRole
+        )
+        boite.addButton("Plus tard", QMessageBox.ButtonRole.RejectRole)
+        ignorer = boite.addButton(
+            "Ignorer cette version", QMessageBox.ButtonRole.DestructiveRole
+        )
+        boite.setDefaultButton(telecharger)
+        boite.exec()
+
+        choix = boite.clickedButton()
+        if choix is ignorer:
+            self._ecrire_reglage(CLE_MAJ_IGNOREE, version.numero)
+            self.status_label.setText(
+                f"Version {version.numero} ignorée ; le menu Aide permet d'y revenir."
+            )
+        elif choix is telecharger:
+            self.telecharger_la_mise_a_jour(version)
+
+    def telecharger_la_mise_a_jour(self, version) -> bool:
+        """Confie le téléchargement au navigateur, puis dit le geste à faire.
+
+        Le logiciel ne se remplace pas lui-même : le navigateur sait reprendre
+        une coupure et montre ce qu'il récupère. Reste le piège de la mise à
+        jour lancée fenêtre ouverte — Windows retient les fichiers d'un
+        programme qui tourne, et l'installation s'arrêterait à mi-chemin. La
+        boîte le rappelle et propose de fermer ; l'installeur, de son côté,
+        s'en aperçoit tout seul (directive `AppMutex`, voir mutex.py).
+        """
+        if not QDesktopServices.openUrl(QUrl(version.telechargement)):
+            QMessageBox.warning(
+                self,
+                f"{APP_NAME} — mise à jour",
+                "Le navigateur n'a pas pu être ouvert. L'adresse à saisir :\n"
+                f"{version.telechargement}",
+            )
+            return False
+
+        boite = QMessageBox(self)
+        boite.setIcon(QMessageBox.Icon.Information)
+        boite.setWindowTitle(f"{APP_NAME} — téléchargement lancé")
+        boite.setTextFormat(Qt.TextFormat.PlainText)
+        boite.setText("Le téléchargement a été lancé dans votre navigateur.")
+        boite.setInformativeText(
+            f"Fermez {APP_NAME} avant de lancer l'installation : Windows retient "
+            "les fichiers d'un programme ouvert, et l'installation s'arrêterait "
+            "à mi-chemin.\n\n"
+            f"Si vous l'oubliez, l'installeur s'en apercevra et proposera de "
+            f"fermer {APP_NAME} pour vous.\n\n"
+            "Vos traces ne sont pas touchées par la mise à jour : elles sont "
+            "rangées à part, dans votre profil utilisateur."
+        )
+        fermer = boite.addButton(
+            f"Fermer {APP_NAME} maintenant", QMessageBox.ButtonRole.AcceptRole
+        )
+        continuer = boite.addButton(
+            "Continuer à travailler", QMessageBox.ButtonRole.RejectRole
+        )
+        boite.setDefaultButton(continuer)
+        boite.exec()
+
+        if boite.clickedButton() is fermer:
+            self.close()
+        return True
+
+    @staticmethod
+    def _aujourd_hui() -> str:
+        return datetime.date.today().isoformat()
+
+    def _lire_reglage(self, cle: str) -> str:
+        """Réglage rangé dans la base. Chaîne vide si elle est indisponible.
+
+        Une base fermée ou en lecture seule ne doit pas faire tomber le
+        programme depuis un traitement différé : au pire, la recherche de mise
+        à jour perd la mémoire de ce qui a été ignoré.
+        """
+        if self.db.closed:
+            return ""
+        try:
+            return self.db.get_meta(cle)
+        except sqlite3.Error:
+            return ""
+
+    def _ecrire_reglage(self, cle: str, valeur: str) -> None:
+        if self.db.closed:
+            return
+        try:
+            self.db.set_meta(cle, valeur)
+        except sqlite3.Error:
+            pass
+
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
@@ -1368,6 +1594,10 @@ class MainWindow(QMainWindow):
         # base : elles n'y touchent pas, mais autant ne rien laisser en vol.
         self.elevation_fetcher.enabled = False
         self.elevation_fetcher.wait(2000)
+        # Idem pour la recherche de mise à jour : sa réponse écrit un réglage
+        # en base, et arriverait après la fermeture de celle-ci.
+        self.update_checker.enabled = False
+        self.update_checker.wait(2000)
         # Couper les remontées de la carte avant de fermer la base : un appel
         # tardif touchant une base close ferait avorter le processus.
         for signal in (
