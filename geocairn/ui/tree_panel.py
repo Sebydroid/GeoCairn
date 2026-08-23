@@ -246,6 +246,10 @@ class TreePanel(QWidget):
 
     track_activated = pyqtSignal(int)
     selection_changed = pyqtSignal(str, object)
+    #: L'étendue de la sélection a changé — un élément, ou plusieurs. Distinct
+    #: de `selection_changed`, qui ne suit que l'élément courant : c'est le
+    #: nombre d'éléments retenus qui décide des actions grisées.
+    selection_count_changed = pyqtSignal()
     export_requested = pyqtSignal(int)
     status_message = pyqtSignal(str)
     resume_requested = pyqtSignal(int)
@@ -291,6 +295,7 @@ class TreePanel(QWidget):
         self.tree.rename_shortcut.connect(lambda: self.rename_selected())
         self.tree.delete_shortcut.connect(lambda: self.delete_selected())
         self.tree.currentItemChanged.connect(self._on_current_changed)
+        self.tree.itemSelectionChanged.connect(self.selection_count_changed)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.items_dropped.connect(self._on_items_dropped)
         self.tree.copy_shortcut.connect(lambda: self.copy_selection())
@@ -463,15 +468,33 @@ class TreePanel(QWidget):
     # ------------------------------------------------------ menu contextuel
 
     def _show_context_menu(self, position) -> None:
-        item = self.tree.itemAt(position)
-        if item is not None:
+        menu = self.build_context_menu(self.tree.itemAt(position))
+        menu.exec(self.tree.viewport().mapToGlobal(position))
+
+    def build_context_menu(self, item: QTreeWidgetItem | None) -> QMenu:
+        """Construit le menu du clic droit, sans l'afficher.
+
+        Séparé de son affichage pour que les tests puissent lire ce qu'il
+        contient et ce qui y est grisé : `exec` bloquerait jusqu'à un clic.
+        """
+        # Un clic droit sur un élément déjà retenu ne doit pas réduire la
+        # sélection à lui seul : `setCurrentItem` sélectionne, et l'utilisateur
+        # perdait ainsi les autres éléments au moment même où il ouvrait le
+        # menu pour agir dessus.
+        if item is not None and not item.isSelected():
             self.tree.setCurrentItem(item)
         kind, ident = self.current_selection()
+        unique = self.selection_unique()
 
         # Les lambdas sont nécessaires : triggered() transmet un booléen
         # « checked » qui serait reçu comme premier argument (donc comme un nom
         # de dossier, ou comme confirm=False sur une suppression).
         menu = QMenu(self)
+        # Sans cela, l'infobulle qui explique le grisage ne s'afficherait pas.
+        menu.setToolTipsVisible(True)
+
+        #: Actions ne sachant traiter qu'un seul élément, grisées au-delà.
+        mono: list = []
 
         if kind in (KIND_FOLDER, KIND_TRACK, KIND_ROOT):
             cible = "le dossier" if kind != KIND_TRACK else "la trace"
@@ -504,49 +527,47 @@ class TreePanel(QWidget):
 
         if kind == KIND_FOLDER:
             menu.addSeparator()
-            menu.addAction(
+            mono.append(menu.addAction(
                 "Renommer le dossier…\tF2", lambda: self.rename_selected()
-            )
+            ))
             menu.addAction(
                 "Supprimer le dossier\tSuppr", lambda: self.delete_selected()
             )
         elif kind == KIND_TRACK:
-            menu.addMenu(self._build_color_menu(int(ident), menu))
+            mono.append(menu.addMenu(self._build_color_menu(int(ident), menu)))
             menu.addSeparator()
-            menu.addAction(
-                "Modifier la trace",
-                lambda: self._emit_for_track(self.resume_requested),
-            )
-            menu.addAction(
-                "Inverser le sens",
-                lambda: self._emit_for_track(self.reverse_requested),
-            )
-            menu.addAction(
-                "Calculer l'altitude (IGN)",
-                lambda: self._emit_for_track(self.elevation_requested),
-            )
-            menu.addAction(
-                "Décimer la trace…",
-                lambda: self._emit_for_track(self.decimate_requested),
-            )
-            menu.addAction(
-                "Dupliquer la trace",
-                lambda: self._emit_for_track(self.duplicate_requested),
-            )
-            menu.addAction(
-                "Fusionner avec…",
-                lambda: self._emit_for_track(self.merge_requested),
-            )
+            for libelle, signal in (
+                ("Modifier la trace", self.resume_requested),
+                ("Inverser le sens", self.reverse_requested),
+                ("Calculer l'altitude (IGN)", self.elevation_requested),
+                ("Décimer la trace…", self.decimate_requested),
+                ("Dupliquer la trace", self.duplicate_requested),
+                ("Fusionner avec…", self.merge_requested),
+            ):
+                mono.append(menu.addAction(
+                    libelle,
+                    lambda s=signal: self._emit_for_track(s),
+                ))
             menu.addSeparator()
-            menu.addAction("Exporter en GPX…", self._request_export)
-            menu.addAction(
+            mono.append(menu.addAction("Exporter en GPX…", self._request_export))
+            mono.append(menu.addAction(
                 "Renommer la trace…\tF2", lambda: self.rename_selected()
-            )
+            ))
             menu.addAction(
                 "Supprimer la trace\tSuppr", lambda: self.delete_selected()
             )
 
-        menu.exec(self.tree.viewport().mapToGlobal(position))
+        # Copier, supprimer, afficher ou zoomer savent traiter toute la
+        # sélection : eux restent actionnables.
+        for action in mono:
+            action.setEnabled(unique)
+            if not unique:
+                action.setToolTip(
+                    "Un seul élément à la fois : cette action ne sait pas en "
+                    "traiter plusieurs."
+                )
+
+        return menu
 
     def _build_color_menu(self, track_id: int, parent: QMenu) -> QMenu:
         menu = QMenu("Couleur", parent)
@@ -601,7 +622,14 @@ class TreePanel(QWidget):
         self._emit_for_track(self.export_requested)
 
     def _emit_for_track(self, signal) -> None:
-        """Émet `signal` avec l'identifiant de la trace sélectionnée."""
+        """Émet `signal` avec l'identifiant de la trace sélectionnée.
+
+        Ne fait rien si plusieurs éléments sont retenus. Les menus grisent déjà
+        ces actions ; ce refus est le garde-fou de dernier ressort, pour les
+        chemins qui ne passent pas par eux.
+        """
+        if not self.selection_unique():
+            return
         kind, ident = self.current_selection()
         if kind == KIND_TRACK:
             signal.emit(int(ident))
@@ -749,6 +777,30 @@ class TreePanel(QWidget):
             for item in self.tree.selectedItems()
             if item.data(COL_BULB, ROLE_KIND) in (KIND_FOLDER, KIND_TRACK)
         ]
+
+    def selection_unique(self) -> bool:
+        """Vrai tant qu'un seul élément est retenu.
+
+        Beaucoup d'actions ne savent traiter qu'une trace : modifier,
+        dupliquer, exporter, découper… Les laisser actionnables avec plusieurs
+        éléments en surbrillance reviendrait à en désigner une au hasard de
+        l'élément courant, et à laisser croire que les autres ont été traitées.
+        """
+        return len(self.selected_items()) <= 1
+
+    def selected_track(self) -> int | None:
+        """La trace sélectionnée, si une seule l'est. None dans tout autre cas.
+
+        None dès qu'il y a zéro élément, plusieurs, ou un dossier : c'est le
+        verrou des actions qui ne traitent qu'une trace.
+        """
+        items = self.selected_items()
+        if len(items) != 1:
+            return None
+        item = items[0]
+        if item.data(COL_BULB, ROLE_KIND) != KIND_TRACK:
+            return None
+        return int(item.data(COL_BULB, ROLE_ID))
 
     def delete_selected(self, confirm: bool = True) -> bool:
         """Supprime les dossiers et traces sélectionnés."""

@@ -71,17 +71,23 @@ C'est ce que le logiciel installé va chercher. Cinq étapes.
 
 ### a. Monter le numéro de version
 
-Un seul endroit : `APP_VERSION` dans
-[geocairn/\_\_init\_\_.py](geocairn/__init__.py). Le nom du fichier produit et
-le numéro affiché par l'installeur en découlent.
+Un seul endroit fait foi : `APP_VERSION` dans
+[geocairn/\_\_init\_\_.py](geocairn/__init__.py).
 
 ```python
-APP_VERSION = "1.1.0"
+APP_VERSION = "0.3"
 ```
 
-Le numéro suit `MAJEUR.MINEUR.CORRECTIF` : correctif pour une réparation,
-mineur pour une nouveauté, majeur pour une rupture. La comparaison faite par le
-logiciel s'appuie sur cette forme.
+Tout en découle : le numéro affiché dans *À propos*, l'en-tête envoyé à GitHub,
+la comparaison avec la dernière version publiée, le nom du fichier produit
+(`GeoCairn-0.3-installation.exe`) et l'`AppVersion` de l'installeur —
+`build.py` le transmet à Inno Setup par `/DMaVersion=`. Le `#define MaVersion`
+d'[installateur.iss](installateur.iss) n'est qu'un repli, pour le cas où `iscc`
+serait lancé à la main ; il est tenu aligné par cohérence, rien de plus.
+
+Le numéro s'écrit `MAJEUR.MINEUR` tant qu'on est en `0.x`, et passera à
+`MAJEUR.MINEUR.CORRECTIF` à la première version stable. Les deux formes se
+comparent correctement : `0.3` vaut `0.3.0`.
 
 ### b. Construire et contrôler
 

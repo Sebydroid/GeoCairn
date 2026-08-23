@@ -7,7 +7,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, QUrl
+from PyQt6.QtCore import QPoint, QStandardPaths, Qt, QTimer, QUrl
 from PyQt6.QtGui import QAction, QDesktopServices, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
@@ -50,6 +50,10 @@ from .update_checker import UpdateChecker
 #: Réglages de la recherche de mise à jour, rangés dans la table `meta`.
 CLE_MAJ_IGNOREE = "maj_version_ignoree"
 CLE_MAJ_DERNIERE = "maj_derniere_recherche"
+
+#: Dernier dossier vers lequel une trace a été exportée. Rangé avec la
+#: bibliothèque, et non avec le poste : il suit les traces de l'utilisateur.
+CLE_DOSSIER_EXPORT = "dernier_dossier_export"
 
 #: Variable d'environnement qui coupe la recherche automatique. Posée par les
 #: tests, et de quoi débrancher la chose sur un poste sans accès à Internet.
@@ -174,6 +178,9 @@ class MainWindow(QMainWindow):
         self.update_checker.echouee.connect(self._on_update_failed)
 
         self.tree_panel.selection_changed.connect(self._on_tree_selection)
+        self.tree_panel.selection_count_changed.connect(
+            self._update_selection_actions
+        )
         self.tree_panel.reverse_requested.connect(self.reverse_track)
         self.tree_panel.elevation_requested.connect(self.fetch_elevations_for)
         self.tree_panel.decimate_requested.connect(self.decimate_track)
@@ -408,6 +415,30 @@ class MainWindow(QMainWindow):
         self.status_label.setText("Brouillon effacé.")
         self._update_draft_actions()
 
+    def _update_selection_actions(self) -> None:
+        """Grise ce qui ne sait traiter qu'une trace, dès qu'il y en a plusieurs.
+
+        Exporter, modifier : ces actions désigneraient sinon une trace au
+        hasard de l'élément courant, en laissant croire que toute la sélection
+        a été traitée. Le menu du clic droit applique la même règle, de son
+        côté.
+        """
+        if self._closing:
+            return
+        unique = self.tree_panel.selected_track() is not None
+
+        self.action_export.setEnabled(unique)
+        self.action_export.setToolTip(
+            "Exporter la trace sélectionnée dans un fichier GPX"
+            if unique
+            else "Une seule trace à la fois : réduisez la sélection"
+        )
+
+        # « Modifier » doit rester actionnable pendant une édition : c'est le
+        # bouton relevé qui en fait sortir, et la sélection a pu changer entre
+        # temps.
+        self.action_resume.setEnabled(unique or self._edit_mode)
+
     def _update_draft_actions(self) -> None:
         """Reflète l'état du brouillon dans la barre d'état et les actions."""
         has_points = not self.draft.is_empty
@@ -432,6 +463,8 @@ class MainWindow(QMainWindow):
             action.blockSignals(True)
             action.setChecked(actif)
             action.blockSignals(False)
+
+        self._update_selection_actions()
 
         self.tree_panel.set_editing_track(
             self.draft.track_id if self.draft.is_existing else None
@@ -1277,15 +1310,25 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------- export GPX (J4)
 
     def _export_selected_track(self) -> None:
-        kind, ident = self.tree_panel.current_selection()
-        if kind != KIND_TRACK:
+        track_id = self.tree_panel.selected_track()
+        if track_id is None:
+            # Le bouton est grisé dans ce cas ; reste le menu Fichier, dont le
+            # raccourci peut partir avant que la sélection ait été relue.
+            if not self.tree_panel.selection_unique():
+                QMessageBox.information(
+                    self,
+                    "Une seule trace à la fois",
+                    "L'export écrit un fichier GPX par trace. Ne gardez qu'une "
+                    "trace sélectionnée.",
+                )
+                return
             QMessageBox.information(
                 self,
                 "Aucune trace sélectionnée",
                 "Sélectionnez une trace dans l'arborescence pour l'exporter.",
             )
             return
-        self.export_track(int(ident))
+        self.export_track(track_id)
 
     def choose_elevation_source(self, points) -> str | None:
         """Demande quelle altitude écrire, quand la trace en porte deux.
@@ -1342,11 +1385,12 @@ class MainWindow(QMainWindow):
             if elevation is None:
                 return None
 
-        if path is None:
+        demande = path is None
+        if demande:
             path, _filter = QFileDialog.getSaveFileName(
                 self,
                 "Exporter en GPX",
-                safe_filename(track.name),
+                self._chemin_export_propose(track.name),
                 "Fichiers GPX (*.gpx)",
             )
             if not path:
@@ -1362,6 +1406,9 @@ class MainWindow(QMainWindow):
             )
             return None
 
+        if demande:
+            self._ecrire_reglage(CLE_DOSSIER_EXPORT, str(Path(written).parent))
+
         precision = ""
         if elevation in LIBELLES_ELEVATION:
             precision = f" ({LIBELLES_ELEVATION[elevation].lower()})"
@@ -1369,6 +1416,23 @@ class MainWindow(QMainWindow):
             f"Trace « {track.name} » exportée vers {written}{precision}."
         )
         return str(written)
+
+    def _chemin_export_propose(self, nom: str) -> str:
+        """Chemin que la boîte d'export propose d'emblée.
+
+        Sans mémoire, Qt ouvre la boîte sur le répertoire courant du processus
+        — pour la version installée, un dossier technique d'AppData où personne
+        ne range ses traces, et qu'il fallait quitter à chaque export. Le
+        dernier dossier retenu sert donc de point de départ ; à défaut, les
+        Documents de l'utilisateur. Un dossier disparu depuis (clé USB retirée,
+        partage déconnecté) est ignoré plutôt que de rouvrir sur du vide.
+        """
+        dossier = self._lire_reglage(CLE_DOSSIER_EXPORT)
+        if not dossier or not Path(dossier).is_dir():
+            dossier = QStandardPaths.writableLocation(
+                QStandardPaths.StandardLocation.DocumentsLocation
+            )
+        return str(Path(dossier) / safe_filename(nom)) if dossier else safe_filename(nom)
 
     # -------------------------------------------------------------- signaux
 
@@ -1585,6 +1649,8 @@ class MainWindow(QMainWindow):
             f"À propos de {APP_NAME}",
             f"<b>{APP_NAME}</b> version {APP_VERSION}<br><br>"
             "Création et gestion de traces de randonnée (GPX).<br><br>"
+            "<i>Ce logiciel a été créé pour l'anniversaire de mon Papa.</i>"
+            "<br><br>"
             f"Données utilisateur :<br><code>{db_path()}</code>",
         )
 
