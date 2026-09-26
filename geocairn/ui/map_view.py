@@ -34,10 +34,15 @@ class MapBridge(QObject):
     point_context = pyqtSignal(int, int, int)
     point_selected = pyqtSignal(int)
     point_inserted = pyqtSignal(int, float, float)
+    impression_prete = pyqtSignal()
 
     @pyqtSlot()
     def js_ready(self) -> None:
         self.ready.emit()
+
+    @pyqtSlot()
+    def js_impression_prete(self) -> None:
+        self.impression_prete.emit()
 
     @pyqtSlot()
     def js_undo_request(self) -> None:
@@ -93,6 +98,8 @@ class MapView(QWebEngineView):
     point_context = pyqtSignal(int, int, int)
     point_selected = pyqtSignal(int)
     point_inserted = pyqtSignal(int, float, float)
+    #: Les tuiles demandées par `preparer_impression` sont arrivées.
+    impression_prete = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -122,6 +129,7 @@ class MapView(QWebEngineView):
         self.bridge.point_context.connect(self.point_context)
         self.bridge.point_selected.connect(self.point_selected)
         self.bridge.point_inserted.connect(self.point_inserted)
+        self.bridge.impression_prete.connect(self.impression_prete)
 
         self._channel = QWebChannel(self._page)
         self._channel.registerObject("bridge", self.bridge)
@@ -260,3 +268,35 @@ class MapView(QWebEngineView):
         """Cadre la carte sur une ou plusieurs traces affichées."""
         ids = json.dumps([int(i) for i in track_ids])
         self.run_js(f"geocairn.zoomTracks({ids});")
+
+    # ------------------------------------------------------------ impression
+
+    def set_print_frame(
+        self,
+        largeur_m: float,
+        hauteur_m: float,
+        ajuster: bool = False,
+        centre: tuple[float, float] | None = None,
+    ) -> None:
+        """Dessine, au centre de la carte, la zone que couvrira la feuille.
+
+        `ajuster` cadre la carte sur la feuille ; `centre` recentre d'abord
+        la carte à cet endroit.
+        """
+        position = "null, null" if centre is None else f"{centre[0]!r}, {centre[1]!r}"
+        self.run_js(
+            f"geocairn.setPrintFrame({float(largeur_m)!r}, {float(hauteur_m)!r},"
+            f" {str(bool(ajuster)).lower()}, {position});"
+        )
+
+    def clear_print_frame(self) -> None:
+        self.run_js("geocairn.clearPrintFrame();")
+
+    def preparer_impression(
+        self, lat: float, lon: float, zoom: float, couche: str
+    ) -> None:
+        """Cadre la carte pour le rendu imprimé ; `impression_prete` suivra."""
+        self.run_js(
+            f"geocairn.preparerImpression({lat!r}, {lon!r}, {float(zoom)!r},"
+            f" {json.dumps(couche)});"
+        )

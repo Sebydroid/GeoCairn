@@ -25,6 +25,9 @@
         /* Mode édition : le curseur indique que le clic pose un point. */
         .leaflet-container.mode-edition { cursor: crosshair; }
         .leaflet-container.mode-edition .leaflet-interactive { cursor: crosshair; }
+        /* Carte rendue pour l'impression : ni boutons ni bandeau d'état. */
+        body.impression .leaflet-control-container,
+        body.impression #status { display: none; }
     </style>
 </head>
 <body>
@@ -331,6 +334,44 @@
         return bounds;
     }
 
+    // --- Cadre d'impression -------------------------------------------------
+    // Rectangle montrant la zone qui tiendra sur la feuille. Il reste centré
+    // sur la carte : on déplace la carte pour choisir ce qui sera imprimé.
+    var cadreImpression = null;   // { largeur, hauteur, rect } en mètres au sol
+
+    function bornesCadre(largeur, hauteur) {
+        // En Web Mercator, un mètre au sol vaut 1 / cos(latitude) mètre
+        // projeté : on raisonne à la latitude du centre, comme au rendu.
+        var centre = map.getCenter();
+        var k = 1 / Math.cos(centre.lat * Math.PI / 180);
+        var p = L.CRS.EPSG3857.project(centre);
+        var dx = largeur * k / 2, dy = hauteur * k / 2;
+        return L.latLngBounds(
+            L.CRS.EPSG3857.unproject(L.point(p.x - dx, p.y - dy)),
+            L.CRS.EPSG3857.unproject(L.point(p.x + dx, p.y + dy))
+        );
+    }
+
+    map.on("move", function () {
+        if (!cadreImpression) { return; }
+        cadreImpression.rect.setBounds(
+            bornesCadre(cadreImpression.largeur, cadreImpression.hauteur));
+    });
+
+    // Rendu pour l'impression : la page est chargée dans une vue invisible,
+    // dimensionnée comme la feuille ; Python attend que les tuiles soient
+    // arrivées pour en prendre l'image.
+    function coucheActive() {
+        for (var nom in layers) {
+            if (map.hasLayer(layers[nom])) { return layers[nom]; }
+        }
+        return null;
+    }
+
+    function signalerImpressionPrete() {
+        if (bridge) { bridge.js_impression_prete(); }
+    }
+
     // --- API appelée depuis Python -----------------------------------------
     window.geocairn = {
         setView: function (lat, lon, zoom) {
@@ -599,6 +640,63 @@
         shownCount: function (id) {
             var trace = shownTracks[id];
             return trace ? trace.line.getLatLngs().length : 0;
+        },
+
+        // -- impression -----------------------------------------------------
+        setPrintFrame: function (largeur, hauteur, ajuster, lat, lon) {
+            // Sans animation : Leaflet ignore un recentrage demandé pendant
+            // qu'un zoom animé est en cours, et le cadre resterait en place.
+            if (lat !== undefined && lat !== null) {
+                map.setView([lat, lon], map.getZoom(), { animate: false });
+            }
+            var bornes = bornesCadre(largeur, hauteur);
+            if (!cadreImpression) {
+                cadreImpression = {
+                    rect: L.rectangle(bornes, {
+                        color: "#c62828", weight: 2, dashArray: "8 6",
+                        fill: true, fillOpacity: 0.04, interactive: false
+                    }).addTo(map)
+                };
+            }
+            cadreImpression.largeur = largeur;
+            cadreImpression.hauteur = hauteur;
+            cadreImpression.rect.setBounds(bornes);
+            // Recadrer sur la feuille : fitBounds garde le centre, donc le
+            // cadre ne se déplace pas, il est seulement vu en entier.
+            if (ajuster) {
+                map.fitBounds(bornes, { padding: [30, 30], animate: false });
+            }
+            return true;
+        },
+
+        clearPrintFrame: function () {
+            if (cadreImpression) { map.removeLayer(cadreImpression.rect); }
+            cadreImpression = null;
+            return true;
+        },
+
+        printFrameBounds: function () {
+            if (!cadreImpression) { return null; }
+            var b = cadreImpression.rect.getBounds();
+            return [[b.getSouth(), b.getWest()], [b.getNorth(), b.getEast()]];
+        },
+
+        preparerImpression: function (lat, lon, zoom, couche) {
+            L.DomUtil.addClass(document.body, "impression");
+            // Zoom fractionnaire : c'est lui qui règle l'échelle exacte.
+            map.options.zoomSnap = 0;
+            // Sans fondu, les tuiles sont opaques dès leur arrivée.
+            map._fadeAnimated = false;
+            if (couche) { geocairn.setBaseLayer(couche); }
+            map.invalidateSize();
+            map.setView([lat, lon], zoom, { animate: false });
+            var active = coucheActive();
+            if (active && active.isLoading()) {
+                active.once("load", signalerImpressionPrete);
+            } else {
+                setTimeout(signalerImpressionPrete, 0);
+            }
+            return [map.getZoom(), map.getSize().x, map.getSize().y];
         }
     };
 

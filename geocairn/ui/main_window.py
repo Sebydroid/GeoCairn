@@ -6,6 +6,7 @@ import datetime
 import os
 import sqlite3
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QPoint, QStandardPaths, Qt, QTimer, QUrl
 from PyQt6.QtGui import QAction, QDesktopServices, QKeySequence
@@ -29,6 +30,16 @@ from ..database import Database
 from ..editor import DraftTrack
 from ..elevation import ElevationError, fetch_elevations
 from ..geo import bounds, format_length, total_length
+from ..impression import (
+    ECHELLE_DEFAUT,
+    FORMAT_DEFAUT,
+    FORMATS,
+    ORIENTATION_DEFAUT,
+    PAYSAGE,
+    PORTRAIT,
+    emprise_des_bornes,
+    lire_echelle,
+)
 from ..gpx import (
     ELE_AUTO,
     LIBELLES_ELEVATION,
@@ -40,12 +51,15 @@ from ..gpx import (
     write_gpx,
 )
 from .elevation_fetcher import ElevationFetcher
-from .map_view import MapView
+from .map_view import LAYER_NAMES, MapView
 from .points_panel import PointsPanel
 from .profile_panel import SOURCE_ELE_SERVICE, ProfilePanel
 from .toolbar_icons import toolbar_icon
 from .tree_panel import KIND_ROOT, KIND_TRACK, TreePanel, track_ids_under
 from .update_checker import UpdateChecker
+
+if TYPE_CHECKING:
+    from .print_dialog import DialogueImpression, ReglagesImpression
 
 #: Réglages de la recherche de mise à jour, rangés dans la table `meta`.
 CLE_MAJ_IGNOREE = "maj_version_ignoree"
@@ -54,6 +68,11 @@ CLE_MAJ_DERNIERE = "maj_derniere_recherche"
 #: Dernier dossier vers lequel une trace a été exportée. Rangé avec la
 #: bibliothèque, et non avec le poste : il suit les traces de l'utilisateur.
 CLE_DOSSIER_EXPORT = "dernier_dossier_export"
+
+#: Derniers réglages d'impression, repris à l'ouverture suivante.
+CLE_IMPRESSION_FORMAT = "impression_format"
+CLE_IMPRESSION_ORIENTATION = "impression_orientation"
+CLE_IMPRESSION_ECHELLE = "impression_echelle"
 
 #: Variable d'environnement qui coupe la recherche automatique. Posée par les
 #: tests, et de quoi débrancher la chose sur un poste sans accès à Internet.
@@ -106,6 +125,11 @@ class MainWindow(QMainWindow):
         #: a rien à dire. Une recherche demandée par le menu, elle, répond
         #: toujours — sans quoi l'utilisateur croirait le menu sans effet.
         self._maj_silencieuse = True
+        #: Centre de la carte et fond affiché : l'impression part de là.
+        self.centre_carte: tuple[float, float] = (48.9315, 1.4402)
+        self.fond_de_carte = LAYER_NAMES[0]
+        #: Boîte d'impression ouverte, s'il y en a une.
+        self.dialogue_impression: DialogueImpression | None = None
 
         self.tree_panel = TreePanel(self.db, self.visible_tracks, self)
         self.points_panel = PointsPanel(self)
@@ -267,6 +291,14 @@ class MainWindow(QMainWindow):
         )
         self.action_export.triggered.connect(self._export_selected_track)
 
+        self.action_print = QAction("Imprimer la carte…", self)
+        self.action_print.setIcon(toolbar_icon("imprimer"))
+        self.action_print.setShortcut(QKeySequence.StandardKey.Print)
+        self.action_print.setToolTip(
+            "Imprimer la carte à l'échelle, ou l'enregistrer en PDF (Ctrl+P)"
+        )
+        self.action_print.triggered.connect(lambda: self.ouvrir_impression())
+
         self.action_new_folder = QAction("Nouveau dossier", self)
         self.action_new_folder.setIcon(
             style.standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder)
@@ -290,6 +322,7 @@ class MainWindow(QMainWindow):
         # l'extérieur, l'entrée en édition, puis les gestes d'édition.
         toolbar.addAction(self.action_import)
         toolbar.addAction(self.action_export)
+        toolbar.addAction(self.action_print)
         toolbar.addSeparator()
         toolbar.addAction(self.action_create)
         toolbar.addAction(self.action_resume)
@@ -306,6 +339,8 @@ class MainWindow(QMainWindow):
         file_menu = menu.addMenu("&Fichier")
         file_menu.addAction(self.action_import)
         file_menu.addAction(self.action_export)
+        file_menu.addSeparator()
+        file_menu.addAction(self.action_print)
         file_menu.addSeparator()
         quit_action = QAction("&Quitter", self)
         quit_action.setShortcut(QKeySequence.StandardKey.Quit)
@@ -1407,7 +1442,7 @@ class MainWindow(QMainWindow):
             return None
 
         if demande:
-            self._ecrire_reglage(CLE_DOSSIER_EXPORT, str(Path(written).parent))
+            self.retenir_dossier_export(written)
 
         precision = ""
         if elevation in LIBELLES_ELEVATION:
@@ -1417,7 +1452,11 @@ class MainWindow(QMainWindow):
         )
         return str(written)
 
-    def _chemin_export_propose(self, nom: str) -> str:
+    def retenir_dossier_export(self, fichier) -> None:
+        """Note le dossier d'un fichier exporté, pour la prochaine fois."""
+        self._ecrire_reglage(CLE_DOSSIER_EXPORT, str(Path(fichier).parent))
+
+    def _chemin_export_propose(self, nom: str, extension: str = ".gpx") -> str:
         """Chemin que la boîte d'export propose d'emblée.
 
         Sans mémoire, Qt ouvre la boîte sur le répertoire courant du processus
@@ -1432,7 +1471,81 @@ class MainWindow(QMainWindow):
             dossier = QStandardPaths.writableLocation(
                 QStandardPaths.StandardLocation.DocumentsLocation
             )
-        return str(Path(dossier) / safe_filename(nom)) if dossier else safe_filename(nom)
+        fichier = safe_filename(nom, extension)
+        return str(Path(dossier) / fichier) if dossier else fichier
+
+    # ------------------------------------------------------------ impression
+
+    def ouvrir_impression(self) -> DialogueImpression:
+        """Ouvre la boîte d'impression, ou ramène au premier plan celle ouverte.
+
+        Elle n'est pas modale : on continue de déplacer la carte pour placer
+        le cadre de la feuille.
+        """
+        if self.dialogue_impression is not None:
+            self.dialogue_impression.raise_()
+            self.dialogue_impression.activateWindow()
+            return self.dialogue_impression
+
+        # Import différé : le module d'impression de Qt n'est chargé qu'au
+        # premier usage, et non à chaque ouverture du logiciel.
+        from .print_dialog import DialogueImpression
+
+        affichees = self.traces_pour_impression()
+        titre = affichees[0].name if len(affichees) == 1 else ""
+        dialogue = DialogueImpression(self, self._reglages_impression(), titre)
+        dialogue.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialogue.finished.connect(lambda _code: self._impression_fermee())
+        dialogue.destroyed.connect(lambda _objet: self._impression_fermee())
+        self.dialogue_impression = dialogue
+        dialogue.show()
+        # Qt la centrerait sur la fenêtre, c'est-à-dire sur la carte et le
+        # cadre qu'elle doit justement laisser voir : on la pose sur la
+        # bibliothèque, à gauche.
+        dialogue.move(self.tree_panel.mapToGlobal(QPoint(12, 24)))
+        return dialogue
+
+    def _impression_fermee(self) -> None:
+        dialogue = self.dialogue_impression
+        if dialogue is None:
+            return
+        self.dialogue_impression = None
+        reglages = dialogue.reglages()
+        if reglages is not None:
+            self._ecrire_reglage(CLE_IMPRESSION_FORMAT, reglages.format_papier)
+            self._ecrire_reglage(CLE_IMPRESSION_ORIENTATION, reglages.orientation)
+            self._ecrire_reglage(CLE_IMPRESSION_ECHELLE, str(reglages.echelle))
+
+    def _reglages_impression(self) -> ReglagesImpression:
+        """Réglages de la dernière impression, ou ceux par défaut."""
+        from .print_dialog import ReglagesImpression
+
+        format_papier = self._lire_reglage(CLE_IMPRESSION_FORMAT)
+        orientation = self._lire_reglage(CLE_IMPRESSION_ORIENTATION)
+        echelle = lire_echelle(self._lire_reglage(CLE_IMPRESSION_ECHELLE))
+        return ReglagesImpression(
+            format_papier if format_papier in FORMATS else FORMAT_DEFAUT,
+            orientation if orientation in (PAYSAGE, PORTRAIT) else ORIENTATION_DEFAUT,
+            echelle or ECHELLE_DEFAUT,
+        )
+
+    def traces_pour_impression(self) -> list:
+        """Traces affichées sur la carte, avec leurs points."""
+        traces = []
+        for track_id in sorted(self.visible_tracks):
+            track = self.db.get_track(track_id, with_points=True)
+            if track is not None and track.points:
+                traces.append(track)
+        return traces
+
+    def emprise_traces_affichees(self) -> tuple[float, float, float, float] | None:
+        """Centre et dimensions au sol de l'ensemble des traces affichées."""
+        points = [p for t in self.traces_pour_impression() for p in t.points]
+        boite = bounds(points)
+        if boite is None:
+            return None
+        (sud, ouest), (nord, est) = boite
+        return emprise_des_bornes(sud, ouest, nord, est)
 
     # -------------------------------------------------------------- signaux
 
@@ -1460,6 +1573,7 @@ class MainWindow(QMainWindow):
             )
 
     def _on_view_changed(self, lat: float, lon: float, zoom: int) -> None:
+        self.centre_carte = (lat, lon)
         self.coord_label.setText(f"Centre : {lat:.5f} ; {lon:.5f}  —  zoom {zoom}")
 
     def _on_map_clicked(self, lat: float, lon: float) -> None:
@@ -1470,6 +1584,7 @@ class MainWindow(QMainWindow):
 
     def _on_layer_changed_from_map(self, name: str) -> None:
         """Le fond de carte se choisit dans le sélecteur de la carte."""
+        self.fond_de_carte = name
         self.status_label.setText(f"Fond de carte : {name}")
 
     # -------------------------------------------------- mise à jour (GitHub)
@@ -1656,6 +1771,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):  # noqa: N802
         self._closing = True
+        # La boîte d'impression tient une carte invisible, qu'il faut fermer
+        # avec elle.
+        if self.dialogue_impression is not None:
+            self.dialogue_impression.close()
         # Laisser les interrogations d'altitude se terminer avant de fermer la
         # base : elles n'y touchent pas, mais autant ne rien laisser en vol.
         self.elevation_fetcher.enabled = False

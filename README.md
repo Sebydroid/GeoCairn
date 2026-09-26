@@ -99,6 +99,8 @@ machine.
 | `geocairn/ui/icons.py` | Ampoules d'affichage, dessinées à la volée |
 | `geocairn/ui/toolbar_icons.py` | Icônes de la barre d'outils, dessinées à la volée |
 | `geocairn/simplify.py` | Décimation d'une trace (Ramer-Douglas-Peucker) |
+| `geocairn/impression.py` | Impression : formats, échelle, emprise au sol |
+| `geocairn/ui/print_dialog.py` | Boîte d'impression, rendu de la carte, mise en page |
 | `geocairn.spec` | Recette de construction de l'exécutable Windows |
 | `build.py` | Construction, allègement, archive, installeur, contrôle |
 | `installateur.iss` | Recette de l'installeur `.exe` (Inno Setup) |
@@ -328,6 +330,8 @@ dossier reste en place comme filet.
   Exécutable `.exe` construit par PyInstaller, autotest de la livraison,
   isolation des données vérifiée y compris en version compilée, stratégie de
   mise à jour documentée et testée.
+- **Impression** : carte imprimée à l'échelle choisie, sur le format de papier
+  choisi, avec aperçu et enregistrement en PDF.
 
 ## Utilisation
 
@@ -410,6 +414,27 @@ tant qu'elle n'est pas reprise.
 **Inverser le sens** (clic droit sur une trace) retourne l'ordre des points.
 Le sens de parcours est visible sur la carte : des flèches jalonnent chaque
 trace affichée, du départ vers l'arrivée.
+
+## Imprimer la carte
+
+**Fichier → Imprimer la carte…** (Ctrl+P), ou le bouton de la barre d'outils.
+
+- Choisir le **format du papier** (A4, A3, A5, Lettre US), l'**orientation** et
+  l'**échelle** : 1 : 25 000 par défaut, d'autres proposées, ou saisie libre
+  (« 30000 », « 1:30 000 »…) entre 1 : 5 000 et 1 : 1 000 000.
+- Un **cadre rouge pointillé** montre sur la carte la zone qui tiendra sur la
+  feuille. Il reste au centre : on **déplace la carte** pour choisir ce qui
+  sera imprimé. La boîte indique l'étendue couverte sur le terrain.
+- **Cadrer sur les traces affichées** centre la feuille sur les traces visibles
+  et choisit l'orientation et la plus grande échelle usuelle où elles tiennent.
+- **Aperçu…**, **Imprimer…** ou **Enregistrer en PDF…**. La feuille porte la
+  carte, le fond affiché et les traces visibles, puis un bandeau : titre,
+  échelle en toutes lettres, barre graduée, nord et sources du fond de carte.
+
+L'échelle est exacte au centre de la feuille : 1 cm sur le papier au
+1 : 25 000 fait 250 m sur le terrain, quelle que soit l'imprimante. Si l'on
+change de papier dans la boîte de Windows, l'échelle reste juste ; seule
+l'étendue couverte change. Les réglages sont retenus d'une impression à l'autre.
 
 ## Altitude et profil
 

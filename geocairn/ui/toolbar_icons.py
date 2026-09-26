@@ -125,6 +125,19 @@ def _dessiner(nom: str) -> QPixmap:
         _stylo(painter, TRAIT, 1.4)
         painter.drawRect(QRectF(6.5, 11, 9, 7.5))       # étiquette
 
+    elif nom == "imprimer":
+        # Imprimante : le bac, le corps, et la feuille qui sort, une trace
+        # dessinée dessus.
+        _stylo(painter, TRAIT, 1.6)
+        painter.drawRect(QRectF(6.5, 2.5, 9, 5))                # bac
+        painter.drawRoundedRect(QRectF(2.5, 7.5, 17, 8), 2, 2)  # corps
+        painter.setBrush(QBrush(QColor("#ffffff")))
+        painter.drawRect(QRectF(6.5, 12.5, 9, 7))               # feuille
+        _stylo(painter, ACCENT, 1.4)
+        painter.drawPolyline(
+            QPolygonF([QPointF(8, 18), QPointF(10, 15), QPointF(12, 17), QPointF(14, 14)])
+        )
+
     elif nom == "trace":
         # Icône des traces dans l'arborescence : ne dépend d'aucun thème.
         _trace(painter)
